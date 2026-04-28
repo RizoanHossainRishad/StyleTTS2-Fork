@@ -567,19 +567,24 @@ def main(config_path):
                 writer.add_scalar('train/d_loss_slm', d_loss_slm, iters)
                 writer.add_scalar('train/gen_loss_slm', loss_gen_lm, iters)
 
+                def to_scalar(x):
+                    if isinstance(x, (int, float)):
+                        return float(x)
+                    return x.item()
+
                 wandb.log({
                     "train/mel_loss": running_loss / log_interval,
-                    "train/gen_loss": loss_gen_all.item(),
-                    "train/d_loss": d_loss.item(),
-                    "train/ce_loss": loss_ce.item(),
-                    "train/dur_loss": loss_dur.item(),
-                    "train/slm_loss": loss_lm.item(),
-                    "train/norm_loss": loss_norm_rec.item(),
-                    "train/F0_loss": loss_F0_rec.item(),
-                    "train/sty_loss": loss_sty if isinstance(loss_sty, float) else loss_sty.item(),
-                    "train/diff_loss": loss_diff if isinstance(loss_diff, float) else loss_diff.item(),
-                    "train/d_loss_slm": d_loss_slm if isinstance(d_loss_slm, float) else float(d_loss_slm),
-                    "train/gen_loss_slm": loss_gen_lm if isinstance(loss_gen_lm, float) else float(loss_gen_lm),
+                    "train/gen_loss": to_scalar(loss_gen_all),
+                    "train/d_loss": to_scalar(d_loss),
+                    "train/ce_loss": to_scalar(loss_ce),
+                    "train/dur_loss": to_scalar(loss_dur),
+                    "train/slm_loss": to_scalar(loss_lm),
+                    "train/norm_loss": to_scalar(loss_norm_rec),
+                    "train/F0_loss": to_scalar(loss_F0_rec),
+                    "train/sty_loss": to_scalar(loss_sty),
+                    "train/diff_loss": to_scalar(loss_diff),
+                    "train/d_loss_slm": to_scalar(d_loss_slm),
+                    "train/gen_loss_slm": to_scalar(loss_gen_lm),
                 }, step=iters)
                 if iters % 5000 == 0:
                     try:

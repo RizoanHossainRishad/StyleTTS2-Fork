@@ -2,6 +2,8 @@
 import random
 import yaml
 import time
+import wandb
+import os
 from munch import Munch
 import numpy as np
 import torch
@@ -12,50 +14,8 @@ import librosa
 import click
 import shutil
 import warnings
-import os
-import os.path as osp
-import csv
 warnings.simplefilter('ignore')
 from torch.utils.tensorboard import SummaryWriter
-
-# =============================================================================
-# .env loading + wandb directory fix
-# -----------------------------------------------------------------------------
-# Must happen BEFORE importing wandb so that the env vars are already set
-# when wandb initialises its internal state on import.
-#
-# load_dotenv() reads key=value pairs from the .env file and pushes them into
-# os.environ so that os.getenv() can find them anywhere in the script.
-#
-# The .env file lives in Configs/.env relative to this script's directory.
-# We build an absolute path using __file__ so the script works regardless of
-# the working directory you launch it from.
-# =============================================================================
-from dotenv import load_dotenv
-
-_env_path = osp.join(osp.dirname(osp.abspath(__file__)), "Configs", ".env")
-load_dotenv(dotenv_path=_env_path)
-
-# Diagnostic: confirm the key loaded before we go any further
-_wandb_api_key = os.getenv("WANDB_API_KEY")
-print(f"[ENV] WANDB_API_KEY loaded: {'YES' if _wandb_api_key else 'NO — check path: ' + _env_path}")
-
-# Fix for servers where HOME points to a non-existent or non-writable mount.
-# wandb needs to write a .netrc file to HOME and a cache dir for run files.
-# We redirect both to a path we know is writable on this machine.
-_wandb_cache_dir = "/workspace/rizoan/StyleTTS2-Fork/wandb_cache"
-os.makedirs(_wandb_cache_dir, exist_ok=True)          # create once if missing
-os.environ["WANDB_CONFIG_DIR"] = _wandb_cache_dir     # wandb config + .netrc location
-os.environ["WANDB_DIR"]        = _wandb_cache_dir     # wandb run files location
-os.environ["HOME"]             = "/workspace/rizoan"  # fixes .netrc write path
-
-# Set the API key directly in the environment.
-# When WANDB_API_KEY is present in os.environ, wandb.login() reads it
-# automatically and skips the .netrc write entirely — avoids the FileNotFoundError.
-if _wandb_api_key:
-    os.environ["WANDB_API_KEY"] = _wandb_api_key
-
-import wandb  # import AFTER env vars are set
 
 from meldataset import build_dataloader
 
@@ -89,255 +49,18 @@ handler.setLevel(logging.DEBUG)
 logger.addHandler(handler)
 
 
-# =============================================================================
-# Helper: safe tensor → Python scalar
-# -----------------------------------------------------------------------------
-# Losses are sometimes plain Python 0 (int) before a training stage activates
-# (e.g. loss_sty = 0 before diff_epoch) and sometimes torch.Tensor afterwards.
-# wandb.log() requires plain Python numbers so we normalise here.
-# Defined once at module level — avoids redefining it inside the hot loop.
-# =============================================================================
-def to_scalar(x):
-    """Return a plain Python float from a torch.Tensor or numeric."""
-    if isinstance(x, torch.Tensor):
-        return x.item()
-    return float(x)
-
-
-# =============================================================================
-# Helper: save waveform tensor to WAV file
-# -----------------------------------------------------------------------------
-# torchaudio.save() requires shape (C, T). Our decoder produces (B, 1, T) so
-# callers index into the batch dimension before passing here.
-# =============================================================================
-def save_audio(path: str, waveform: torch.Tensor, sample_rate: int):
-    """Save a 1-D or 2-D waveform tensor to disk as a WAV file."""
-    wav = waveform.detach().cpu()
-    if wav.ndim == 1:
-        wav = wav.unsqueeze(0)   # (T,) → (1, T)
-    torchaudio.save(path, wav, sample_rate)
-
-
-# =============================================================================
-# Per-epoch validation inference
-# -----------------------------------------------------------------------------
-# Called once at the end of every epoch (after the metric validation loop).
-# Iterates the full validation dataloader, synthesises audio for every sample,
-# saves generated + reference WAVs under Output/Epoch_XXXX/, and appends rows
-# to a shared routing CSV so all epochs accumulate in one queryable file.
-#
-# A small number of clips (max_samples_to_log) are also uploaded to W&B as an
-# Audio table so you can listen in the browser without downloading files.
-# Set max_wandb_audio_samples: 0 in config to disable uploads entirely.
-#
-# Reference WAVs are only written on the first inference epoch (infer_start_epoch)
-# to avoid duplicating identical files across all epochs and wasting disk space.
-# The CSV still records the reference path for every epoch pointing back to
-# the first-epoch copy so lookups always work.
-# =============================================================================
-def run_validation_inference(
-    epoch: int,
-    infer_start_epoch: int,         # the first epoch inference ran (for ref path lookup)
-    model,
-    val_dataloader,
-    stft_loss,
-    n_down: int,
-    sr: int,
-    device: str,
-    log_dir: str,
-    csv_path: str,
-    wandb_run,
-    max_samples_to_log: int = 4,
-):
-    """Synthesise validation audio, save to disk, write routing CSV rows."""
-
-    # Output folder for this epoch's generated files
-    epoch_out_dir = osp.join(log_dir, "Output", f"Epoch_{epoch + 1:04d}")
-    os.makedirs(epoch_out_dir, exist_ok=True)
-
-    # Reference files always live in the first inference epoch's folder
-    ref_epoch_dir = osp.join(log_dir, "Output", f"Epoch_{infer_start_epoch + 1:04d}")
-
-    # CSV: write header only on the very first call when the file doesn't exist
-    write_header = not osp.exists(csv_path)
-    csv_file   = open(csv_path, "a", newline="", encoding="utf-8")
-    csv_writer = csv.writer(csv_file)
-    if write_header:
-        csv_writer.writerow([
-            "epoch",           # 1-based epoch index
-            "batch_idx",       # batch index within val_dataloader
-            "sample_idx",      # sample index within the batch
-            "mel_loss",        # STFT mel loss for this batch
-            "generated_path",  # path to synthesised WAV (relative to log_dir)
-            "reference_path",  # path to reference WAV (relative to log_dir)
-        ])
-
-    total_mel_loss  = 0.0
-    num_batches     = 0
-    wandb_audio_rows = []   # (gen_np, ref_np) pairs for W&B table upload
-
-    is_first_infer_epoch = (epoch == infer_start_epoch)
-
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(val_dataloader):
-            try:
-                waves = batch[0]
-                batch = [b.to(device) for b in batch[1:]]
-                texts, input_lengths, ref_texts, ref_lengths, mels, mel_input_length, ref_mels = batch
-
-                mask      = length_to_mask(mel_input_length // (2 ** n_down)).to(device)
-                text_mask = length_to_mask(input_lengths).to(texts.device)
-
-                _, _, s2s_attn = model.text_aligner(mels, mask, texts)
-                s2s_attn = s2s_attn.transpose(-1, -2)
-                s2s_attn = s2s_attn[..., 1:]
-                s2s_attn = s2s_attn.transpose(-1, -2)
-
-                mask_ST       = mask_from_lens(s2s_attn, input_lengths, mel_input_length // (2 ** n_down))
-                s2s_attn_mono = maximum_path(s2s_attn, mask_ST)
-
-                t_en = model.text_encoder(texts, input_lengths, text_mask)
-                asr  = t_en @ s2s_attn_mono
-                d_gt = s2s_attn_mono.sum(axis=-1).detach()
-
-                ss, gs = [], []
-                for bib in range(len(mel_input_length)):
-                    mel = mels[bib, :, :mel_input_length[bib]]
-                    ss.append(model.predictor_encoder(mel.unsqueeze(0).unsqueeze(1)))
-                    gs.append(model.style_encoder(mel.unsqueeze(0).unsqueeze(1)))
-
-                s_pred = torch.stack(ss).squeeze(1)
-                gs     = torch.stack(gs).squeeze(1)
-
-                bert_dur = model.bert(texts, attention_mask=(~text_mask).int())
-                d_en     = model.bert_encoder(bert_dur).transpose(-1, -2)
-                d, p     = model.predictor(d_en, s_pred, input_lengths, s2s_attn_mono, text_mask)
-
-                mel_len = int(mel_input_length.min().item() / 2 - 1)
-                en_list, p_en_list, gt_list, wav_list = [], [], [], []
-
-                for bib in range(len(mel_input_length)):
-                    mel_length = int(mel_input_length[bib].item() / 2)
-                    rstart     = np.random.randint(0, mel_length - mel_len)
-                    en_list.append(asr[bib, :, rstart:rstart + mel_len])
-                    p_en_list.append(p[bib, :, rstart:rstart + mel_len])
-                    gt_list.append(mels[bib, :, rstart * 2:(rstart + mel_len) * 2])
-                    y = waves[bib][rstart * 2 * 300:(rstart + mel_len) * 2 * 300]
-                    wav_list.append(torch.from_numpy(y).to(device))
-
-                wav_gt = torch.stack(wav_list).float()
-                en     = torch.stack(en_list)
-                p_en   = torch.stack(p_en_list)
-                gt     = torch.stack(gt_list).detach()
-
-                s_clip     = model.style_encoder(gt.unsqueeze(1))
-                s_dur_clip = model.predictor_encoder(gt.unsqueeze(1))
-
-                F0_fake, N_fake = model.predictor.F0Ntrain(p_en, s_dur_clip)
-                y_rec = model.decoder(en, F0_fake, N_fake, s_clip)
-
-                batch_mel_loss  = stft_loss(y_rec.squeeze(1), wav_gt.detach()).item()
-                total_mel_loss += batch_mel_loss
-                num_batches    += 1
-
-                # Save per-sample audio files and write CSV rows
-                for sample_idx in range(y_rec.shape[0]):
-                    gen_filename = f"generated_batch{batch_idx:03d}_sample{sample_idx:02d}.wav"
-                    ref_filename = f"reference_batch{batch_idx:03d}_sample{sample_idx:02d}.wav"
-                    gen_path     = osp.join(epoch_out_dir, gen_filename)
-                    ref_path     = osp.join(ref_epoch_dir, ref_filename)  # always points to first epoch
-
-                    # Generated audio: written every epoch
-                    save_audio(gen_path, y_rec[sample_idx], sr)
-
-                    # Reference audio: written only on the first inference epoch
-                    # to avoid duplicating identical files for every subsequent epoch
-                    if is_first_infer_epoch:
-                        os.makedirs(ref_epoch_dir, exist_ok=True)
-                        save_audio(ref_path, wav_gt[sample_idx], sr)
-
-                    rel_gen = osp.relpath(gen_path, log_dir)
-                    rel_ref = osp.relpath(ref_path, log_dir)
-                    csv_writer.writerow([
-                        epoch + 1,
-                        batch_idx,
-                        sample_idx,
-                        f"{batch_mel_loss:.5f}",
-                        rel_gen,
-                        rel_ref,
-                    ])
-
-                    # Collect clips for W&B audio table (capped at max_samples_to_log)
-                    if len(wandb_audio_rows) < max_samples_to_log:
-                        wandb_audio_rows.append((
-                            y_rec[sample_idx].squeeze().detach().cpu().numpy(),
-                            wav_gt[sample_idx].squeeze().detach().cpu().numpy(),
-                        ))
-
-            except Exception as e:
-                logger.warning(f"[Inference] Batch {batch_idx} failed: {e}")
-                continue
-
-    csv_file.close()
-    avg_mel_loss = total_mel_loss / max(num_batches, 1)
-
-    # Upload audio table to W&B (skipped if max_samples_to_log == 0)
-    if wandb_run is not None and wandb_audio_rows:
-        audio_table = wandb.Table(columns=["epoch", "sample", "generated", "reference"])
-        for idx, (gen_np, ref_np) in enumerate(wandb_audio_rows):
-            audio_table.add_data(
-                epoch + 1,
-                idx,
-                wandb.Audio(gen_np, sample_rate=sr, caption=f"ep{epoch+1}_gen_{idx}"),
-                wandb.Audio(ref_np, sample_rate=sr, caption=f"ep{epoch+1}_ref_{idx}"),
-            )
-        wandb_run.log(
-            {"val_inference/audio_samples": audio_table},
-            commit=False,   # committed together with eval metrics below
-        )
-
-    logger.info(
-        f"[Inference] Epoch {epoch+1}: avg mel loss = {avg_mel_loss:.5f}, "
-        f"saved to {epoch_out_dir}"
-    )
-    return avg_mel_loss
-
-
 @click.command()
 @click.option('-p', '--config_path', default='Configs/config_ft.yml', type=str)
 def main(config_path):
     config = yaml.safe_load(open(config_path))
 
-    # =========================================================================
-    # W&B initialisation
-    # -------------------------------------------------------------------------
-    # wandb.login() reads WANDB_API_KEY from os.environ (set above at module
-    # level) so no key argument is needed here — avoids the .netrc write path.
-    # wandb.init() creates the run and logs the entire YAML config as
-    # hyper-parameters visible under the Config tab in the W&B dashboard.
-    # resume="allow" means if the run crashes and you restart with the same
-    # run_id it will continue the existing run rather than creating a new one.
-    # =========================================================================
-    wandb.login()
-    wandb_run = wandb.init(
-        project=config.get("wandb_project", "styletts2-finetune"),
-        name=config.get("wandb_run_name", f"run_{int(time.time())}"),
-        config=config,      # logs all YAML keys as hyper-parameters
-        resume="allow",
-    )
-    logger.info(f"W&B run: {wandb_run.name}  id: {wandb_run.id}")
+    wandb.login(key=os.environ.get("WANDB_API_KEY"))
 
-    # =========================================================================
-    # Everything below is IDENTICAL to the original code.
-    # The only additions are:
-    #   1. wandb.log() calls inside the log_interval block (training metrics)
-    #   2. wandb.log() call after validation metrics
-    #   3. run_validation_inference() call after validation loop (audio saving)
-    #   4. wandb.run.summary updates inside the checkpoint block (best loss)
-    #   5. wandb.finish() at the very end
-    # Nothing else has been changed.
-    # =========================================================================
-
+    wandb.init(
+        project="styletts2-bangla",
+        name="styletss2_bn_ft_test",
+        config=config
+)
     log_dir = config['log_dir']
     if not osp.exists(log_dir): os.makedirs(log_dir, exist_ok=True)
     shutil.copy(config_path, osp.join(log_dir, osp.basename(config_path)))
@@ -349,24 +72,13 @@ def main(config_path):
     file_handler.setFormatter(logging.Formatter('%(levelname)s:%(asctime)s: %(message)s'))
     logger.addHandler(file_handler)
 
-    # Routing CSV path — one file for the whole run, appended each epoch
-    routing_csv_path = osp.join(log_dir, "validation_routing.csv")
-
+    
     batch_size = config.get('batch_size', 10)
 
     epochs = config.get('epochs', 200)
     save_freq = config.get('save_freq', 2)
     log_interval = config.get('log_interval', 10)
     saving_epoch = config.get('save_freq', 2)
-
-    # infer_start_epoch: skip audio inference for the first N epochs where the
-    # model output is still noise — saves disk space. Default 0 = always infer.
-    infer_start_epoch = config.get('infer_start_epoch', 0)
-
-    # max_wandb_audio_samples: how many clips to upload to W&B per epoch.
-    # Keep this small (≤ 8) to stay within the free 5 GB quota.
-    # Set to 0 to disable W&B audio uploads entirely (files still saved locally).
-    max_wandb_audio = config.get('max_wandb_audio_samples', 4)
 
     data_params = config.get('data_params', None)
     sr = config['preprocess_params'].get('sr', 24000)
@@ -392,7 +104,7 @@ def main(config_path):
                                         OOD_data=OOD_data,
                                         min_length=min_length,
                                         batch_size=batch_size,
-                                        num_workers=0,   # 0 = no subprocess workers, avoids CUDA context deadlock on single GPU
+                                        num_workers=2,
                                         dataset_config={},
                                         device=device)
 
@@ -443,8 +155,9 @@ def main(config_path):
                 None, 
                 first_stage_path,
                 load_only_params=True,
-                ignore_modules=['bert', 'bert_encoder', 'predictor', 'predictor_encoder', 'msd', 'mpd', 'wd', 'diffusion'])
+                ignore_modules=['bert', 'bert_encoder', 'predictor', 'predictor_encoder', 'msd', 'mpd', 'wd', 'diffusion']) # keep starting epoch for tensorboard log
 
+            # these epochs should be counted from the start epoch
             diff_epoch += start_epoch
             joint_epoch += start_epoch
             epochs += start_epoch
@@ -467,7 +180,7 @@ def main(config_path):
     sampler = DiffusionSampler(
         model.diffusion.diffusion,
         sampler=ADPM2Sampler(),
-        sigma_schedule=KarrasSchedule(sigma_min=0.0001, sigma_max=3.0, rho=9.0),
+        sigma_schedule=KarrasSchedule(sigma_min=0.0001, sigma_max=3.0, rho=9.0), # empirical parameters
         clamp=False
     )
     
@@ -485,6 +198,7 @@ def main(config_path):
     optimizer = build_optimizer({key: model[key].parameters() for key in model},
                                           scheduler_params_dict=scheduler_params_dict, lr=optimizer_params.lr)
     
+    # adjust BERT learning rate
     for g in optimizer.optimizers['bert'].param_groups:
         g['betas'] = (0.9, 0.99)
         g['lr'] = optimizer_params.bert_lr
@@ -492,6 +206,7 @@ def main(config_path):
         g['min_lr'] = 0
         g['weight_decay'] = 0.01
         
+    # adjust acoustic module learning rate
     for module in ["decoder", "style_encoder"]:
         for g in optimizer.optimizers[module].param_groups:
             g['betas'] = (0.0, 0.99)
@@ -500,18 +215,19 @@ def main(config_path):
             g['min_lr'] = 0
             g['weight_decay'] = 1e-4
         
+    # load models if there is a model
     if load_pretrained:
         model, optimizer, start_epoch, iters = load_checkpoint(model,  optimizer, config['pretrained_model'],
                                     load_only_params=config.get('load_only_params', True))
         
     n_down = model.text_aligner.n_down
 
-    best_loss = float('inf')
+    best_loss = float('inf')  # best test loss
     loss_train_record = list([])
     loss_test_record = list([])
     iters = 0
     
-    criterion = nn.L1Loss()
+    criterion = nn.L1Loss() # F0 loss (regression)
     torch.cuda.empty_cache()
     
     stft_loss = MultiResolutionSTFTLoss().to(device)
@@ -557,6 +273,7 @@ def main(config_path):
                 mel_mask = length_to_mask(mel_input_length).to(device)
                 text_mask = length_to_mask(input_lengths).to(texts.device)
 
+                # compute reference styles
                 if multispeaker and epoch >= diff_epoch:
                     ref_ss = model.style_encoder(ref_mels.unsqueeze(1))
                     ref_sp = model.predictor_encoder(ref_mels.unsqueeze(1))
@@ -573,8 +290,10 @@ def main(config_path):
             mask_ST = mask_from_lens(s2s_attn, input_lengths, mel_input_length // (2 ** n_down))
             s2s_attn_mono = maximum_path(s2s_attn, mask_ST)
 
+            # encode
             t_en = model.text_encoder(texts, input_lengths, text_mask)
             
+            # 50% of chance of using monotonic version
             if bool(random.getrandbits(1)):
                 asr = (t_en @ s2s_attn)
             else:
@@ -582,6 +301,8 @@ def main(config_path):
 
             d_gt = s2s_attn_mono.sum(axis=-1).detach()
 
+            # compute the style of the entire utterance
+            # this operation cannot be done in batch because of the avgpool layer (may need to work on masked avgpool)
             ss = []
             gs = []
             for bib in range(len(mel_input_length)):
@@ -592,42 +313,45 @@ def main(config_path):
                 s = model.style_encoder(mel.unsqueeze(0).unsqueeze(1))
                 gs.append(s)
 
-            s_dur = torch.stack(ss).squeeze()
-            gs = torch.stack(gs).squeeze()
-            s_trg = torch.cat([gs, s_dur], dim=-1).detach()
+            s_dur = torch.stack(ss).squeeze()  # global prosodic styles
+            gs = torch.stack(gs).squeeze() # global acoustic styles
+            s_trg = torch.cat([gs, s_dur], dim=-1).detach() # ground truth for denoiser
 
             bert_dur = model.bert(texts, attention_mask=(~text_mask).int())
             d_en = model.bert_encoder(bert_dur).transpose(-1, -2) 
             
+            # denoiser training
             if epoch >= diff_epoch:
                 num_steps = np.random.randint(3, 5)
                 
                 if model_params.diffusion.dist.estimate_sigma_data:
-                    model.diffusion.module.diffusion.sigma_data = s_trg.std(axis=-1).mean().item()
+                    model.diffusion.module.diffusion.sigma_data = s_trg.std(axis=-1).mean().item() # batch-wise std estimation
                     running_std.append(model.diffusion.module.diffusion.sigma_data)
                     
                 if multispeaker:
                     s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
                           embedding=bert_dur,
                           embedding_scale=1,
-                                   features=ref,
+                                   features=ref, # reference from the same speaker as the embedding
                              embedding_mask_proba=0.1,
                              num_steps=num_steps).squeeze(1)
-                    loss_diff = model.diffusion(s_trg.unsqueeze(1), embedding=bert_dur, features=ref).mean()
-                    loss_sty = F.l1_loss(s_preds, s_trg.detach())
+                    loss_diff = model.diffusion(s_trg.unsqueeze(1), embedding=bert_dur, features=ref).mean() # EDM loss
+                    loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
                 else:
                     s_preds = sampler(noise = torch.randn_like(s_trg).unsqueeze(1).to(device), 
                           embedding=bert_dur,
                           embedding_scale=1,
                              embedding_mask_proba=0.1,
                              num_steps=num_steps).squeeze(1)                    
-                    loss_diff = model.diffusion.module.diffusion(s_trg.unsqueeze(1), embedding=bert_dur).mean()
-                    loss_sty = F.l1_loss(s_preds, s_trg.detach())
+                    loss_diff = model.diffusion.module.diffusion(s_trg.unsqueeze(1), embedding=bert_dur).mean() # EDM loss
+                    loss_sty = F.l1_loss(s_preds, s_trg.detach()) # style reconstruction loss
             else:
                 loss_sty = 0
                 loss_diff = 0
 
+                
             s_loss = 0
+            
 
             d, p = model.predictor(d_en, s_dur, 
                                                     input_lengths, 
@@ -653,6 +377,7 @@ def main(config_path):
                 y = waves[bib][(random_start * 2) * 300:((random_start+mel_len) * 2) * 300]
                 wav.append(torch.from_numpy(y).to(device))
                 
+                # style reference (better to be different from the GT)
                 random_start = np.random.randint(0, mel_length - mel_len_st)
                 st.append(mels[bib, :, (random_start * 2):((random_start+mel_len_st) * 2)])
                 
@@ -662,6 +387,7 @@ def main(config_path):
             p_en = torch.stack(p_en)
             gt = torch.stack(gt).detach()
             st = torch.stack(st).detach()
+            
             
             if gt.size(-1) < 80:
                 continue
@@ -693,6 +419,7 @@ def main(config_path):
             optimizer.step('msd')
             optimizer.step('mpd')
 
+            # generator loss
             optimizer.zero_grad()
 
             loss_mel = stft_loss(y_rec, wav)
@@ -756,6 +483,7 @@ def main(config_path):
 
             d_loss_slm, loss_gen_lm = 0, 0
             if epoch >= joint_epoch:
+                # randomly pick whether to use in-distribution text
                 if np.random.rand() < 0.5:
                     use_ind = True
                 else:
@@ -776,9 +504,11 @@ def main(config_path):
                 if slm_out is not None:
                     d_loss_slm, loss_gen_lm, y_pred = slm_out
 
+                    # SLM generator loss
                     optimizer.zero_grad()
                     loss_gen_lm.backward()
 
+                    # compute the gradient norm
                     total_norm = {}
                     for key in model.keys():
                         total_norm[key] = 0
@@ -788,6 +518,7 @@ def main(config_path):
                             total_norm[key] += param_norm.item() ** 2
                         total_norm[key] = total_norm[key] ** 0.5
 
+                    # gradient scaling
                     if total_norm['predictor'] > slmadv_params.thresh:
                         for key in model.keys():
                             for p in model[key].parameters():
@@ -811,6 +542,7 @@ def main(config_path):
                     optimizer.step('predictor')
                     optimizer.step('diffusion')
 
+                    # SLM discriminator loss
                     if d_loss_slm != 0:
                         optimizer.zero_grad()
                         d_loss_slm.backward(retain_graph=True)
@@ -835,25 +567,39 @@ def main(config_path):
                 writer.add_scalar('train/d_loss_slm', d_loss_slm, iters)
                 writer.add_scalar('train/gen_loss_slm', loss_gen_lm, iters)
 
-                # ── W&B training metrics ──────────────────────────────────────
-                # step=iters keeps x-axis aligned with global step count so
-                # training and validation curves share the same x-axis in W&B.
+                def to_scalar(x):
+                    if isinstance(x, (int, float)):
+                        return float(x)
+                    return x.item()
+
                 wandb.log({
-                    "train/mel_loss":     running_loss / log_interval,
-                    "train/gen_loss":     to_scalar(loss_gen_all),
-                    "train/d_loss":       to_scalar(d_loss),
-                    "train/ce_loss":      to_scalar(loss_ce),
-                    "train/dur_loss":     to_scalar(loss_dur),
-                    "train/slm_loss":     to_scalar(loss_lm),
-                    "train/norm_loss":    to_scalar(loss_norm_rec),
-                    "train/F0_loss":      to_scalar(loss_F0_rec),
-                    "train/sty_loss":     to_scalar(loss_sty),
-                    "train/diff_loss":    to_scalar(loss_diff),
-                    "train/d_loss_slm":   to_scalar(d_loss_slm),
+                    "train/mel_loss": running_loss / log_interval,
+                    "train/gen_loss": to_scalar(loss_gen_all),
+                    "train/d_loss": to_scalar(d_loss),
+                    "train/ce_loss": to_scalar(loss_ce),
+                    "train/dur_loss": to_scalar(loss_dur),
+                    "train/slm_loss": to_scalar(loss_lm),
+                    "train/norm_loss": to_scalar(loss_norm_rec),
+                    "train/F0_loss": to_scalar(loss_F0_rec),
+                    "train/sty_loss": to_scalar(loss_sty),
+                    "train/diff_loss": to_scalar(loss_diff),
+                    "train/d_loss_slm": to_scalar(d_loss_slm),
                     "train/gen_loss_slm": to_scalar(loss_gen_lm),
-                    "train/s2s_loss":     to_scalar(loss_s2s),
-                    "train/mono_loss":    to_scalar(loss_mono),
-                }, step=iters, commit=True)
+                }, step=iters)
+                if iters % 5000 == 0:
+                    try:
+                        # take first sample from batch
+                        audio_fake = y_rec[0].squeeze().detach().cpu().numpy()
+                        audio_real = wav[0].squeeze().detach().cpu().numpy()
+                        audio_real = wav[0].detach().cpu().numpy()
+
+                        wandb.log({
+                            "audio/generated": wandb.Audio(audio_fake, sample_rate=24000),
+                            "audio/ground_truth": wandb.Audio(audio_real, sample_rate=24000),
+                        }, step=iters)
+
+                    except Exception as e:
+                        print("Audio logging failed:", e)
                 
                 running_loss = 0
                 
@@ -885,6 +631,7 @@ def main(config_path):
                         mask_ST = mask_from_lens(s2s_attn, input_lengths, mel_input_length // (2 ** n_down))
                         s2s_attn_mono = maximum_path(s2s_attn, mask_ST)
 
+                        # encode
                         t_en = model.text_encoder(texts, input_lengths, text_mask)
                         asr = (t_en @ s2s_attn_mono)
 
@@ -911,6 +658,7 @@ def main(config_path):
                                                         input_lengths, 
                                                         s2s_attn_mono, 
                                                         text_mask)
+                    # get clips
                     mel_len = int(mel_input_length.min().item() / 2 - 1)
                     en = []
                     gt = []
@@ -974,48 +722,16 @@ def main(config_path):
         writer.add_scalar('eval/mel_loss', loss_test / iters_test, epoch + 1)
         writer.add_scalar('eval/dur_loss', loss_test / iters_test, epoch + 1)
         writer.add_scalar('eval/F0_loss', loss_f / iters_test, epoch + 1)
-
-        # ── W&B validation metrics ────────────────────────────────────────────
-        # commit=False — we flush together with the audio table below so all
-        # end-of-epoch metrics appear as one atomic step in W&B.
-        wandb.log({
-            "eval/mel_loss": (loss_test  / iters_test).item(),
-            "eval/dur_loss": (loss_align / iters_test).item(),
-            "eval/F0_loss":  (loss_f     / iters_test).item(),
-        }, step=iters, commit=False)
-
-        # ── Per-epoch validation inference + audio saving ─────────────────────
-        # Runs full synthesis on the validation set, saves WAV files under
-        # Output/Epoch_XXXX/, appends rows to validation_routing.csv, and
-        # uploads a small audio table to W&B.
-        if epoch >= infer_start_epoch:
-            infer_mel_loss = run_validation_inference(
-                epoch=epoch,
-                infer_start_epoch=infer_start_epoch,
-                model=model,
-                val_dataloader=val_dataloader,
-                stft_loss=stft_loss,
-                n_down=n_down,
-                sr=sr,
-                device=device,
-                log_dir=log_dir,
-                csv_path=routing_csv_path,
-                wandb_run=wandb_run,
-                max_samples_to_log=max_wandb_audio,
-            )
-            wandb.log({"eval/infer_mel_loss": infer_mel_loss}, step=iters, commit=False)
-            writer.add_scalar('eval/infer_mel_loss', infer_mel_loss, epoch + 1)
-
-        # Flush all pending end-of-epoch W&B metrics in one call
-        wandb.log({}, step=iters, commit=True)
         
-        if (epoch + 1) % save_freq == 0:
-            # Update best loss tracker
-            current_val_loss = loss_test / iters_test
-            is_best = current_val_loss < best_loss
-            if is_best:
-                best_loss = current_val_loss
-
+        wandb.log({
+            "eval/mel_loss": (loss_test / iters_test).item(),
+            "eval/dur_loss": (loss_align / iters_test).item(),
+            "eval/F0_loss": (loss_f / iters_test).item(),
+        }, step=epoch)
+        
+        if (epoch + 1) % save_freq == 0 :
+            if (loss_test / iters_test) < best_loss:
+                best_loss = loss_test / iters_test
             print('Saving..')
             state = {
                 'net':  {key: model[key].state_dict() for key in model}, 
@@ -1024,33 +740,15 @@ def main(config_path):
                 'val_loss': loss_test / iters_test,
                 'epoch': epoch,
             }
-
-            # Periodic checkpoint — named by epoch number for easy rollback
             save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
             torch.save(state, save_path)
-            logger.info(f'[Save] Periodic checkpoint → {save_path}')
-
-            # Best model — overwrite a single file so you always know which
-            # checkpoint had the lowest validation loss without hunting epoch numbers
-            if is_best:
-                best_path = osp.join(log_dir, 'best_model.pth')
-                torch.save(state, best_path)
-                logger.info(f'[Save] New best val loss {best_loss:.5f} → {best_path}')
-                # Summary metrics persist across steps in W&B run comparison table
-                wandb.run.summary["best_val_mel_loss"] = to_scalar(best_loss)
-                wandb.run.summary["best_epoch"]        = epoch + 1
-
-            # if estimate sigma, save the estimated sigma
+            wandb.save(save_path)
+            # if estimate sigma, save the estimated simga
             if model_params.diffusion.dist.estimate_sigma_data:
                 config['model_params']['diffusion']['dist']['sigma_data'] = float(np.mean(running_std))
 
                 with open(osp.join(log_dir, osp.basename(config_path)), 'w') as outfile:
                     yaml.dump(config, outfile, default_flow_style=True)
-
-    # ── Cleanup ───────────────────────────────────────────────────────────────
-    writer.close()
-    wandb.finish()   # flush remaining W&B data and mark run as finished
-    logger.info('Training complete.')
 
                             
 if __name__=="__main__":

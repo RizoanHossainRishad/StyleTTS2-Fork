@@ -223,7 +223,8 @@ def run_validation_inference(
                     p_en_list.append(p[bib, :, rstart:rstart + mel_len])
                     gt_list.append(mels[bib, :, rstart * 2:(rstart + mel_len) * 2])
                     y = waves[bib][rstart * 2 * 300:(rstart + mel_len) * 2 * 300]
-                    wav_list.append(torch.from_numpy(y).to(device))
+                    #wav_list.append(torch.from_numpy(y).to(device))
+                    wav_list.append(torch.tensor(y, dtype=torch.float32, device=device))
 
                 wav_gt = torch.stack(wav_list).float()
                 en     = torch.stack(en_list)
@@ -644,14 +645,23 @@ def main(config_path):
             
             for bib in range(len(mel_input_length)):
                 mel_length = int(mel_input_length[bib].item() / 2)
-
+                if mel_length <= mel_len:
+                    continue
                 random_start = np.random.randint(0, mel_length - mel_len)
                 en.append(asr[bib, :, random_start:random_start+mel_len])
                 p_en.append(p[bib, :, random_start:random_start+mel_len])
                 gt.append(mels[bib, :, (random_start * 2):((random_start+mel_len) * 2)])
                 
-                y = waves[bib][(random_start * 2) * 300:((random_start+mel_len) * 2) * 300]
-                wav.append(torch.from_numpy(y).to(device))
+                #y = waves[bib][(random_start * 2) * 300:((random_start+mel_len) * 2) * 300]
+                start = (random_start * 2) * 300
+                end   = ((random_start + mel_len) * 2) * 300
+
+                if end > len(waves[bib]):
+                    continue
+
+                y = waves[bib][start:end]
+                #wav.append(torch.from_numpy(y).to(device))
+                wav.append(torch.tensor(y, dtype=torch.float32, device=device))
                 
                 random_start = np.random.randint(0, mel_length - mel_len_st)
                 st.append(mels[bib, :, (random_start * 2):((random_start+mel_len_st) * 2)])
@@ -683,6 +693,10 @@ def main(config_path):
             F0_fake, N_fake = model.predictor.F0Ntrain(p_en, s_dur)
 
             y_rec = model.decoder(en, F0_fake, N_fake, s)
+            # 🔴 ADD THIS BLOCK RIGHT HERE
+            if torch.isnan(y_rec).any() or torch.isinf(y_rec).any():
+                print(f"[NaN DETECTED] Skipping batch at epoch {epoch}, step {i}")
+                continue
 
             loss_F0_rec =  (F.smooth_l1_loss(F0_real, F0_fake)) / 10
             loss_norm_rec = F.smooth_l1_loss(N_real, N_fake)
@@ -919,15 +933,24 @@ def main(config_path):
                     wav = []
 
                     for bib in range(len(mel_input_length)):
-                        mel_length = int(mel_input_length[bib].item() / 2)
+                        if mel_length <= mel_len:
+                            continue
 
                         random_start = np.random.randint(0, mel_length - mel_len)
                         en.append(asr[bib, :, random_start:random_start+mel_len])
                         p_en.append(p[bib, :, random_start:random_start+mel_len])
 
                         gt.append(mels[bib, :, (random_start * 2):((random_start+mel_len) * 2)])
-                        y = waves[bib][(random_start * 2) * 300:((random_start+mel_len) * 2) * 300]
-                        wav.append(torch.from_numpy(y).to(device))
+                        #y = waves[bib][(random_start * 2) * 300:((random_start+mel_len) * 2) * 300]
+                        start = (random_start * 2) * 300
+                        end   = ((random_start + mel_len) * 2) * 300
+
+                        if end > len(waves[bib]):
+                            continue
+
+                        y = waves[bib][start:end]
+                        #wav.append(torch.from_numpy(y).to(device))
+                        wav.append(torch.tensor(y, dtype=torch.float32, device=device))
 
                     wav = torch.stack(wav).float().detach()
 
@@ -954,6 +977,9 @@ def main(config_path):
                     s = model.style_encoder(gt.unsqueeze(1))
 
                     y_rec = model.decoder(en, F0_fake, N_fake, s)
+                    if torch.isnan(y_rec).any() or torch.isinf(y_rec).any():
+                        logger.warning(f"[Inference] NaN detected at batch {batch_idx} → skipping")
+                        continue
                     loss_mel = stft_loss(y_rec.squeeze(), wav.detach())
 
                     F0_real, _, F0 = model.pitch_extractor(gt.unsqueeze(1)) 
@@ -1029,12 +1055,22 @@ def main(config_path):
             save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
             torch.save(state, save_path)
             logger.info(f'[Save] Periodic checkpoint → {save_path}')
+            # 🔴 DEBUG: verify checkpoint was actually written
+            if os.path.exists(save_path):
+                logger.info(f"[Save OK] Checkpoint successfully written → {save_path}")
+            else:
+                logger.error(f"[Save FAIL] Checkpoint NOT found after saving → {save_path}")
 
             # Best model — overwrite a single file so you always know which
             # checkpoint had the lowest validation loss without hunting epoch numbers
             if is_best:
                 best_path = osp.join(log_dir, 'best_model.pth')
                 torch.save(state, best_path)
+                # 🔴 DEBUG: verify checkpoint was actually written
+                if os.path.exists(save_path):
+                    logger.info(f"[Save OK] Checkpoint successfully written → {save_path}")
+                else:
+                    logger.error(f"[Save FAIL] Checkpoint NOT found after saving → {save_path}")
                 logger.info(f'[Save] New best val loss {best_loss:.5f} → {best_path}')
                 # Summary metrics persist across steps in W&B run comparison table
                 wandb.run.summary["best_val_mel_loss"] = to_scalar(best_loss)

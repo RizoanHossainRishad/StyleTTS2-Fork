@@ -1,0 +1,133 @@
+<svg viewBox="0 0 620 820" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+
+  <!-- background -->
+  <rect width="620" height="820" fill="#0f1117"/>
+
+  <!-- title -->
+  <text x="310" y="32" text-anchor="middle" font-size="13" font-weight="700" fill="#94a3b8" letter-spacing="1">StyleTTS2 Fine-Tune — Training Flow</text>
+
+  <!-- ── STARTUP ──────────────────────────────── -->
+  <rect x="180" y="52" width="260" height="44" rx="8" fill="#0f2236" stroke="#1e5799" stroke-width="1.2"/>
+  <text x="310" y="70" text-anchor="middle" font-size="12" font-weight="700" fill="#93c5fd">Startup</text>
+  <text x="310" y="86" text-anchor="middle" font-size="10.5" fill="#7dd3fc">Load .env → W&amp;B init → TensorBoard init</text>
+
+  <!-- arrow -->
+  <line x1="310" y1="96" x2="310" y2="116" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── MODEL SETUP ──────────────────────────── -->
+  <rect x="180" y="116" width="260" height="44" rx="8" fill="#231a05" stroke="#d97706" stroke-width="1.2"/>
+  <text x="310" y="134" text-anchor="middle" font-size="12" font-weight="700" fill="#fcd34d">Model &amp; Data Setup</text>
+  <text x="310" y="150" text-anchor="middle" font-size="10.5" fill="#fbbf24">Load checkpoint → Build optimizers</text>
+
+  <!-- arrow -->
+  <line x1="310" y1="160" x2="310" y2="180" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── EPOCH LOOP BOX ───────────────────────── -->
+  <rect x="30" y="180" width="560" height="500" rx="12" fill="none" stroke="#334155" stroke-width="1.5" stroke-dasharray="6 3"/>
+  <rect x="50" y="172" width="130" height="18" rx="4" fill="#0f1117"/>
+  <text x="115" y="184" text-anchor="middle" font-size="10" font-weight="700" fill="#64748b" letter-spacing="1">FOR EACH EPOCH</text>
+
+  <!-- ── TRAIN BATCH ──────────────────────────── -->
+  <rect x="170" y="196" width="280" height="84" rx="8" fill="#0f2236" stroke="#1e5799" stroke-width="1.2"/>
+  <text x="310" y="216" text-anchor="middle" font-size="12" font-weight="700" fill="#93c5fd">Training Batch Loop</text>
+  <text x="310" y="234" text-anchor="middle" font-size="10.5" fill="#7dd3fc">Forward pass → compute all losses</text>
+  <text x="310" y="250" text-anchor="middle" font-size="10.5" fill="#7dd3fc">Discriminator update → Generator update</text>
+  <text x="310" y="266" text-anchor="middle" font-size="10.5" fill="#7dd3fc">SLM adversarial update (from joint_epoch)</text>
+
+  <!-- arrow -->
+  <line x1="310" y1="280" x2="310" y2="300" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── TRAINING LOG ──────────────────────────── -->
+  <text x="310" y="298" text-anchor="middle" font-size="9.5" fill="#475569">every log_interval batches</text>
+
+  <!-- two side-by-side log boxes -->
+  <rect x="80" y="308" width="200" height="56" rx="8" fill="#111830" stroke="#4f46e5" stroke-width="1.2"/>
+  <text x="180" y="328" text-anchor="middle" font-size="11.5" font-weight="700" fill="#a5b4fc">W&amp;B Log</text>
+  <text x="180" y="344" text-anchor="middle" font-size="10" fill="#818cf8">14 train metrics</text>
+  <text x="180" y="358" text-anchor="middle" font-size="10" fill="#818cf8">step = iters · commit = True</text>
+
+  <rect x="340" y="308" width="200" height="56" rx="8" fill="#161b25" stroke="#334155" stroke-width="1.2"/>
+  <text x="440" y="328" text-anchor="middle" font-size="11.5" font-weight="700" fill="#cbd5e1">TensorBoard Log</text>
+  <text x="440" y="344" text-anchor="middle" font-size="10" fill="#94a3b8">12 train metrics</text>
+  <text x="440" y="358" text-anchor="middle" font-size="10" fill="#94a3b8">step = iters</text>
+
+  <!-- connector between the two boxes -->
+  <line x1="280" y1="336" x2="340" y2="336" stroke="#1e293b" stroke-width="1" stroke-dasharray="3 2"/>
+
+  <!-- arrow down from log boxes -->
+  <line x1="310" y1="364" x2="310" y2="386" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="310" y="384" text-anchor="middle" font-size="9.5" fill="#475569">end of epoch</text>
+
+  <!-- ── VALIDATION ──────────────────────────── -->
+  <rect x="170" y="394" width="280" height="56" rx="8" fill="#0d2626" stroke="#0e7490" stroke-width="1.2"/>
+  <text x="310" y="414" text-anchor="middle" font-size="12" font-weight="700" fill="#5eead4">Validation Loop</text>
+  <text x="310" y="430" text-anchor="middle" font-size="10.5" fill="#67e8f9">Synthesise val set → mel loss, dur loss, F0 loss</text>
+  <text x="310" y="446" text-anchor="middle" font-size="10.5" fill="#67e8f9">Save audio to Output/Epoch_XXXX/ + routing CSV</text>
+
+  <!-- arrow -->
+  <line x1="310" y1="450" x2="310" y2="470" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- two side-by-side val log boxes -->
+  <rect x="80" y="478" width="200" height="56" rx="8" fill="#111830" stroke="#4f46e5" stroke-width="1.2"/>
+  <text x="180" y="498" text-anchor="middle" font-size="11.5" font-weight="700" fill="#a5b4fc">W&amp;B Log</text>
+  <text x="180" y="514" text-anchor="middle" font-size="10" fill="#818cf8">eval metrics + audio table</text>
+  <text x="180" y="528" text-anchor="middle" font-size="10" fill="#818cf8">step = iters · commit = True</text>
+
+  <rect x="340" y="478" width="200" height="56" rx="8" fill="#161b25" stroke="#334155" stroke-width="1.2"/>
+  <text x="440" y="498" text-anchor="middle" font-size="11.5" font-weight="700" fill="#cbd5e1">TensorBoard Log</text>
+  <text x="440" y="514" text-anchor="middle" font-size="10" fill="#94a3b8">eval/mel · dur · F0</text>
+  <text x="440" y="528" text-anchor="middle" font-size="10" fill="#94a3b8">step = epoch+1</text>
+
+  <line x1="280" y1="506" x2="340" y2="506" stroke="#1e293b" stroke-width="1" stroke-dasharray="3 2"/>
+
+  <!-- arrow -->
+  <line x1="310" y1="534" x2="310" y2="554" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── CHECKPOINT ─────────────────────────── -->
+  <rect x="80" y="562" width="200" height="68" rx="8" fill="#0d2318" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="180" y="582" text-anchor="middle" font-size="11.5" font-weight="700" fill="#86efac">Periodic Checkpoint</text>
+  <text x="180" y="598" text-anchor="middle" font-size="10" fill="#6ee7b7">every save_freq epochs</text>
+  <text x="180" y="612" text-anchor="middle" font-size="10" fill="#6ee7b7">epoch_2nd_XXXXX.pth</text>
+  <text x="180" y="626" text-anchor="middle" font-size="10" fill="#6ee7b7">net · optimizer · iters · val_loss</text>
+
+  <rect x="340" y="562" width="200" height="68" rx="8" fill="#0d2318" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="440" y="582" text-anchor="middle" font-size="11.5" font-weight="700" fill="#86efac">Best Model</text>
+  <text x="440" y="598" text-anchor="middle" font-size="10" fill="#6ee7b7">when val_loss improves</text>
+  <text x="440" y="612" text-anchor="middle" font-size="10" fill="#6ee7b7">best_model.pth</text>
+  <text x="440" y="626" text-anchor="middle" font-size="10" fill="#6ee7b7">W&amp;B summary: best_loss + epoch</text>
+
+  <line x1="280" y1="596" x2="340" y2="596" stroke="#1e293b" stroke-width="1" stroke-dasharray="3 2"/>
+
+  <!-- loop-back arrow (right side) -->
+  <line x1="590" y1="596" x2="600" y2="596" stroke="#334155" stroke-width="1.2"/>
+  <line x1="600" y1="596" x2="600" y2="238" stroke="#334155" stroke-width="1.2"/>
+  <line x1="600" y1="238" x2="452" y2="238" stroke="#334155" stroke-width="1.2" marker-end="url(#arr)"/>
+  <text x="608" y="420" text-anchor="start" font-size="9.5" fill="#475569" transform="rotate(90 608 420)">next epoch</text>
+
+  <!-- ── CLEANUP ──────────────────────────────── -->
+  <line x1="310" y1="630" x2="310" y2="654" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="170" y="660" width="280" height="44" rx="8" fill="#161b25" stroke="#334155" stroke-width="1.2"/>
+  <text x="310" y="678" text-anchor="middle" font-size="12" font-weight="700" fill="#94a3b8">Cleanup</text>
+  <text x="310" y="694" text-anchor="middle" font-size="10.5" fill="#64748b">writer.close() · wandb.finish()</text>
+
+  <!-- arrow -->
+  <line x1="310" y1="704" x2="310" y2="724" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- DONE -->
+  <rect x="230" y="730" width="160" height="38" rx="19" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
+  <text x="310" y="754" text-anchor="middle" font-size="12" font-weight="700" fill="#e2e8f0">🏁 Training Complete</text>
+
+  <!-- ── LEGEND ───────────────────────────────── -->
+  <text x="310" y="795" text-anchor="middle" font-size="9.5" fill="#334155">
+    ■ Blue = model/training  ■ Amber = setup  ■ Teal = validation  ■ Green = checkpoint  ■ Indigo = logging
+  </text>
+
+  <!-- arrowhead marker -->
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M1 1L9 5L1 9" fill="none" stroke="#475569" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+</svg>

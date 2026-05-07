@@ -180,6 +180,7 @@ def run_validation_inference(
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(val_dataloader):
+            logger.info(f"[DEBUG] Inference batch {batch_idx}")
             try:
                 waves = batch[0]
                 batch = [b.to(device) for b in batch[1:]]
@@ -292,10 +293,10 @@ def run_validation_inference(
                 wandb.Audio(gen_np, sample_rate=sr, caption=f"ep{epoch+1}_gen_{idx}"),
                 wandb.Audio(ref_np, sample_rate=sr, caption=f"ep{epoch+1}_ref_{idx}"),
             )
-        wandb_run.log(
-            {"val_inference/audio_samples": audio_table},
-            commit=False,   # committed together with eval metrics below
-        )
+            wandb_run.log(
+                {f"val_inference/audio_epoch_{epoch+1}": audio_table},
+                commit=False,
+            )
 
     logger.info(
         f"[Inference] Epoch {epoch+1}: avg mel loss = {avg_mel_loss:.5f}, "
@@ -356,7 +357,7 @@ def main(config_path):
     batch_size = config.get('batch_size', 10)
 
     epochs = config.get('epochs', 200)
-    save_freq = config.get('save_freq', 2)
+    save_freq = config.get('save_freq', 1)
     log_interval = config.get('log_interval', 10)
     saving_epoch = config.get('save_freq', 2)
 
@@ -367,7 +368,7 @@ def main(config_path):
     # max_wandb_audio_samples: how many clips to upload to W&B per epoch.
     # Keep this small (≤ 8) to stay within the free 5 GB quota.
     # Set to 0 to disable W&B audio uploads entirely (files still saved locally).
-    max_wandb_audio = config.get('max_wandb_audio_samples', 4)
+    max_wandb_audio = config.get('max_wandb_audio_samples', 2)
 
     data_params = config.get('data_params', None)
     sr = config['preprocess_params'].get('sr', 24000)
@@ -877,7 +878,7 @@ def main(config_path):
         loss_align = 0
         loss_f = 0
         _ = [model[key].eval() for key in model]
-
+        logger.info("[DEBUG] Validation loop starting...")
         with torch.no_grad():
             iters_test = 0
             for batch_idx, batch in enumerate(val_dataloader):
@@ -1015,6 +1016,7 @@ def main(config_path):
         # Output/Epoch_XXXX/, appends rows to validation_routing.csv, and
         # uploads a small audio table to W&B.
         if epoch >= infer_start_epoch:
+            logger.info("[DEBUG] Validation inference starting...")
             infer_mel_loss = run_validation_inference(
                 epoch=epoch,
                 infer_start_epoch=infer_start_epoch,
@@ -1042,6 +1044,7 @@ def main(config_path):
             if is_best:
                 best_loss = current_val_loss
 
+            logger.info("[DEBUG] Checkpoint saving starting...")
             print('Saving..')
             state = {
                 'net':  {key: model[key].state_dict() for key in model}, 
@@ -1054,6 +1057,9 @@ def main(config_path):
             # Periodic checkpoint — named by epoch number for easy rollback
             save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
             torch.save(state, save_path)
+
+            logger.info("[DEBUG] torch.save completed successfully")
+
             logger.info(f'[Save] Periodic checkpoint → {save_path}')
             # 🔴 DEBUG: verify checkpoint was actually written
             if os.path.exists(save_path):

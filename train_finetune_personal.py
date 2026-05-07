@@ -1,10 +1,23 @@
 # load packages
+import os
+
 import random
 import yaml
 import time
 from munch import Munch
 import numpy as np
+
+
+#os.environ["OMP_NUM_THREADS"] = "4"
+#os.environ["MKL_NUM_THREADS"] = "4"
+#os.environ["OPENBLAS_NUM_THREADS"] = "4"
+#os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+#os.environ["NUMEXPR_NUM_THREADS"] = "4"
 import torch
+# Limit PyTorch's CPU thread usage to prevent the server from getting stuck
+#torch.set_num_threads(4)
+
+
 from torch import nn
 import torch.nn.functional as F
 import torchaudio

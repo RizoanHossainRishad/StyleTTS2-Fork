@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>StyleTTS2 Fine-Tune — System Architecture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f1117; font-family: 'Segoe UI', sans-serif; color: #e2e8f0; padding: 24px; }
+
+  h1 { text-align: center; font-size: 16px; color: #94a3b8; letter-spacing: 2px;
+       text-transform: uppercase; margin-bottom: 24px; font-weight: 400; }
+
+  .root { display: flex; flex-direction: column; gap: 14px; max-width: 1000px; margin: 0 auto; }
+
+  .section-label {
+    font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: #64748b; font-weight: 700; margin-bottom: 5px; padding-left: 4px;
+  }
+
+  .card { border-radius: 10px; padding: 11px 15px; border: 1px solid; }
+  .card-title { font-size: 12.5px; font-weight: 700; margin-bottom: 5px; }
+  .card-body  { font-size: 11px; color: #94a3b8; line-height: 1.65; }
+
+  .blue   { background:#0f2236; border-color:#1e5799; }
+  .teal   { background:#0d2626; border-color:#0e7490; }
+  .purple { background:#1a1040; border-color:#7c3aed; }
+  .amber  { background:#231a05; border-color:#d97706; }
+  .green  { background:#0d2318; border-color:#16a34a; }
+  .red    { background:#2a0d0d; border-color:#dc2626; }
+  .gray   { background:#161b25; border-color:#334155; }
+  .indigo { background:#111830; border-color:#4f46e5; }
+  .pink   { background:#220d1c; border-color:#db2777; }
+
+  .row { display: flex; gap: 10px; }
+  .col { flex: 1; display: flex; flex-direction: column; gap: 9px; }
+
+  .arrow { text-align: center; color: #475569; font-size: 20px; line-height: 1.2; padding: 2px 0; }
+
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .tag  { font-size: 10px; border-radius: 4px; padding: 1px 7px; font-weight: 600; }
+  .tag-blue   { background:#1e4080; color:#93c5fd; }
+  .tag-teal   { background:#0a4040; color:#5eead4; }
+  .tag-purple { background:#3b1c7a; color:#c4b5fd; }
+  .tag-amber  { background:#4a2a00; color:#fcd34d; }
+  .tag-green  { background:#0a3d1a; color:#86efac; }
+  .tag-red    { background:#4a0f0f; color:#fca5a5; }
+  .tag-gray   { background:#1e293b; color:#94a3b8; }
+  .tag-pink   { background:#4a0e2a; color:#f9a8d4; }
+
+  .divider { border: none; border-top: 1px dashed #1e293b; margin: 6px 0; }
+
+  .epoch-box {
+    border: 2px dashed #334155; border-radius: 14px;
+    padding: 16px; position: relative;
+  }
+  .epoch-badge {
+    position: absolute; top: -11px; left: 18px;
+    background: #0f1117; color: #64748b;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    padding: 2px 12px; border-radius: 4px; text-transform: uppercase;
+    border: 1px solid #334155;
+  }
+
+  .mono { font-family: 'Courier New', monospace; font-size: 10.5px; color: #7dd3fc; }
+
+  .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 50%;
+    font-size: 10px; font-weight: 800; flex-shrink: 0; margin-right: 7px;
+  }
+  .step-row { display: flex; align-items: flex-start; margin-bottom: 4px; }
+
+  .inner-section { margin-top: 12px; }
+
+  .badge {
+    display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+    padding: 1px 7px; border-radius: 3px; text-transform: uppercase; margin-left: 6px;
+  }
+  .badge-green  { background:#0a3d1a; color:#86efac; }
+  .badge-amber  { background:#4a2a00; color:#fcd34d; }
+  .badge-purple { background:#3b1c7a; color:#c4b5fd; }
+  .badge-gray   { background:#1e293b; color:#94a3b8; }
+</style>
+</head>
+<body>
+<div class="root">
+
+  <h1>StyleTTS2 Single-GPU Fine-Tune — Full System Architecture</h1>
+
+  <!-- ══════════════════ STARTUP ══════════════════ -->
+  <div class="section-label">① Startup &amp; Environment Initialisation</div>
+  <div class="row">
+    <div class="card gray col">
+      <div class="card-title">🔑 .env Loading <span class="badge badge-gray">module level — before wandb import</span></div>
+      <div class="card-body">
+        <div class="step-row"><span class="step-num" style="background:#1e293b;color:#94a3b8">1</span>Set OMP/MKL/NUMEXPR threads = 4 &amp; <span class="mono">torch.set_num_threads(4)</span> to prevent CPU deadlock on shared server</div>
+        <div class="step-row"><span class="step-num" style="background:#1e293b;color:#94a3b8">2</span><span class="mono">load_dotenv(Configs/.env)</span> → pushes WANDB_API_KEY into os.environ</div>
+        <div class="step-row"><span class="step-num" style="background:#1e293b;color:#94a3b8">3</span>Override HOME, WANDB_CONFIG_DIR, WANDB_DIR → <span class="mono">/workspace/rizoan/…/wandb_cache</span> (server HOME is a broken mount)</div>
+        <div class="step-row"><span class="step-num" style="background:#1e293b;color:#94a3b8">4</span><span class="mono">import wandb</span> after env vars — avoids .netrc FileNotFoundError</div>
+      </div>
+    </div>
+    <div class="card indigo col">
+      <div class="card-title">🚀 W&amp;B + TensorBoard Init</div>
+      <div class="card-body">
+        <div class="step-row"><span class="step-num" style="background:#1e3080;color:#a5b4fc">W</span><span class="mono">wandb.login()</span> reads key from os.environ, skips .netrc write</div>
+        <div class="step-row"><span class="step-num" style="background:#1e3080;color:#a5b4fc">W</span><span class="mono">wandb.init(project, name, config=yaml, resume="allow")</span> — logs all YAML keys as hyperparams</div>
+        <div class="step-row"><span class="step-num" style="background:#1e2a50;color:#94a3b8">T</span><span class="mono">SummaryWriter(log_dir/tensorboard)</span> — both backends run in parallel</div>
+        <div class="step-row"><span class="step-num" style="background:#1e2a50;color:#94a3b8">F</span>File logger → <span class="mono">train.log</span> (DEBUG+ with timestamps)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <!-- ══════════════════ MODEL + DATA ══════════════════ -->
+  <div class="section-label">② Model Build &amp; Data Setup</div>
+  <div class="row">
+    <div class="card blue col">
+      <div class="card-title">🏗 Model Components (all → cuda:0)</div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag tag-blue">text_aligner</span>
+          <span class="tag tag-blue">text_encoder</span>
+          <span class="tag tag-blue">bert + bert_encoder</span>
+          <span class="tag tag-blue">predictor + predictor_encoder</span>
+          <span class="tag tag-blue">style_encoder</span>
+          <span class="tag tag-blue">decoder</span>
+          <span class="tag tag-purple">diffusion</span>
+          <span class="tag tag-red">mpd + msd (discriminators)</span>
+          <span class="tag tag-gray">wd (WavLM discriminator)</span>
+          <span class="tag tag-teal">pitch_extractor (frozen)</span>
+        </div>
+        <hr class="divider"/>
+        <div>MyDataParallel wraps all except mpd, msd, wd<br/>
+        gl, dl, wl loss modules wrapped in MyDataParallel</div>
+      </div>
+    </div>
+    <div class="card teal col">
+      <div class="card-title">📦 DataLoaders</div>
+      <div class="card-body">
+        <div class="step-row"><span class="step-num" style="background:#0a3a3a;color:#5eead4">T</span>Train: <span class="mono">num_workers=0</span>, batch_size from config</div>
+        <div class="step-row"><span class="step-num" style="background:#0a3a3a;color:#5eead4">V</span>Val: <span class="mono">num_workers=0, validation=True</span></div>
+        <hr class="divider"/>
+        <div style="color:#0e9f6e; font-size:10.5px">⚠ num_workers=0 mandatory on single GPU — prevents CUDA context deadlock between dataloader subprocesses and main process</div>
+      </div>
+    </div>
+    <div class="card amber col">
+      <div class="card-title">📂 Checkpoint Load Strategy</div>
+      <div class="card-body">
+        <div class="step-row"><span class="step-num" style="background:#3a2000;color:#fcd34d">A</span>First-stage .pth → acoustic modules only, ignore bert/diffusion/predictor*</div>
+        <div class="step-row"><span class="step-num" style="background:#3a2000;color:#fcd34d">B</span>predictor_encoder ← deepcopy(style_encoder) to bootstrap second stage</div>
+        <div class="step-row"><span class="step-num" style="background:#3a2000;color:#fcd34d">C</span>OR: full pretrained second-stage + optimizer state for resuming mid-run</div>
+        <div style="margin-top:4px; font-size:10.5px">diff_epoch / joint_epoch / epochs offset by start_epoch after load</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <!-- ══════════════════ EPOCH BOX ══════════════════ -->
+  <div class="epoch-box">
+    <div class="epoch-badge">FOR EACH EPOCH  (start_epoch → epochs)</div>
+
+    <!-- TRAINING -->
+    <div class="inner-section">
+      <div class="section-label">③ Training Batch Loop  (enumerate train_dataloader)</div>
+      <div class="row">
+        <div class="card blue col">
+          <div class="card-title">🔄 Forward Pass Pipeline</div>
+          <div class="card-body">
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">1</span>text_aligner(mels, mask, texts) → soft s2s_attn → monotonic s2s_attn_mono</div>
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">2</span>text_encoder → ASR features (50% soft / 50% mono — stochastic augmentation)</div>
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">3</span>per-utterance loop → style_encoder (acoustic s) + predictor_encoder (prosodic s_dur)</div>
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">4</span>BERT + bert_encoder → duration feature d_en</div>
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">5</span>predictor(d_en, s_dur) → duration logits d, prosody p</div>
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">6</span>Random clip slice bounded by mel_len ≤ max_len/2 and shortest utterance</div>
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">7</span>pitch_extractor (frozen) → F0_real, N_real from GT clip</div>
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">8</span>predictor.F0Ntrain(p_en, s_dur) → F0_fake, N_fake</div>
+            <div class="step-row"><span class="step-num" style="background:#1e4080;color:#93c5fd">9</span>decoder(en, F0_fake, N_fake, s) → y_rec  |  isnan(y_rec) → skip</div>
+            <div class="step-row"><span class="step-num" style="background:#2a0f50;color:#c4b5fd">D</span>Diffusion sampler + EDM loss + style L1 (active from diff_epoch)</div>
+          </div>
+        </div>
+        <div class="col" style="min-width:230px; gap:9px">
+          <div class="card red">
+            <div class="card-title">⚔ Discriminator Update</div>
+            <div class="card-body">
+              dl(wav.detach(), y_rec.detach()) → d_loss → backward<br/>
+              optimizer.step(msd) · optimizer.step(mpd)
+            </div>
+          </div>
+          <div class="card green">
+            <div class="card-title">🔧 Generator Loss (g_loss)</div>
+            <div class="card-body">
+              <div class="tags">
+                <span class="tag tag-green">λ_mel·stft</span>
+                <span class="tag tag-green">λ_F0·smoothL1</span>
+                <span class="tag tag-green">λ_ce·BCE</span>
+                <span class="tag tag-green">λ_norm·smoothL1</span>
+                <span class="tag tag-green">λ_dur·L1</span>
+                <span class="tag tag-green">λ_gen·GAN</span>
+                <span class="tag tag-green">λ_slm·WavLM</span>
+                <span class="tag tag-purple">λ_sty·L1</span>
+                <span class="tag tag-purple">λ_diff·EDM</span>
+                <span class="tag tag-amber">λ_mono·L1×10</span>
+                <span class="tag tag-amber">λ_s2s·CTC</span>
+              </div>
+              <div style="margin-top:5px; font-size:10.5px">Steps: bert_encoder, bert, predictor, predictor_encoder, style_encoder, decoder, text_encoder, text_aligner + diffusion (from diff_epoch)</div>
+            </div>
+          </div>
+          <div class="card purple">
+            <div class="card-title">🧬 SLM Adversarial <span class="badge badge-amber">from joint_epoch</span></div>
+            <div class="card-body">
+              slmadv() → d_loss_slm + loss_gen_lm<br/>
+              Adaptive grad clip via predictor norm threshold<br/>
+              Extra scale on lstm, duration_proj, diffusion params
+            </div>
+          </div>
+          <div class="card gray">
+            <div class="card-title">🛡 Stability Guards</div>
+            <div class="card-body">
+              <span class="mono">mel_length ≤ mel_len → skip</span><br/>
+              <span class="mono">end &gt; len(waves[bib]) → skip</span><br/>
+              <span class="mono">gt.size(-1) &lt; 80 → skip</span><br/>
+              <span class="mono">isnan(y_rec) → skip batch</span><br/>
+              <span class="mono">isnan(g_loss) → IPython debugger</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow" style="margin:8px 0">↓ &nbsp; iters += 1</div>
+
+    <!-- LOG INTERVAL -->
+    <div class="section-label">④ Training Logging &nbsp;<span style="color:#475569;font-size:9px;letter-spacing:0">(every log_interval batches)</span></div>
+    <div class="row">
+      <div class="card indigo col">
+        <div class="card-title">📊 W&amp;B  <span class="badge badge-purple">step=iters</span> <span class="badge badge-green">commit=True</span></div>
+        <div class="card-body">
+          <div class="tags">
+            <span class="tag tag-teal">mel_loss</span><span class="tag tag-teal">gen_loss</span><span class="tag tag-teal">d_loss</span>
+            <span class="tag tag-teal">ce_loss</span><span class="tag tag-teal">dur_loss</span><span class="tag tag-teal">slm_loss</span>
+            <span class="tag tag-teal">norm_loss</span><span class="tag tag-teal">F0_loss</span>
+            <span class="tag tag-purple">sty_loss</span><span class="tag tag-purple">diff_loss</span>
+            <span class="tag tag-red">d_loss_slm</span><span class="tag tag-red">gen_loss_slm</span>
+            <span class="tag tag-amber">s2s_loss</span><span class="tag tag-amber">mono_loss</span>
+          </div>
+          <div style="margin-top:5px; font-size:10.5px; color:#818cf8">14 metrics · all via to_scalar() · x-axis = global step</div>
+        </div>
+      </div>
+      <div class="card gray col">
+        <div class="card-title">📈 TensorBoard  <span class="badge badge-gray">step=iters</span></div>
+        <div class="card-body">
+          <div class="tags">
+            <span class="tag tag-gray">train/mel_loss</span><span class="tag tag-gray">train/gen_loss</span>
+            <span class="tag tag-gray">train/d_loss</span><span class="tag tag-gray">train/ce_loss</span>
+            <span class="tag tag-gray">train/dur_loss</span><span class="tag tag-gray">train/slm_loss</span>
+            <span class="tag tag-gray">train/norm_loss</span><span class="tag tag-gray">train/F0_loss</span>
+            <span class="tag tag-gray">train/sty_loss</span><span class="tag tag-gray">train/diff_loss</span>
+            <span class="tag tag-gray">train/d_loss_slm</span><span class="tag tag-gray">train/gen_loss_slm</span>
+          </div>
+        </div>
+      </div>
+      <div class="card gray col" style="max-width:170px">
+        <div class="card-title">🖨 File Log + stdout</div>
+        <div class="card-body">
+          Full loss string → <span class="mono">train.log</span><br/>
+          Wall-time → stdout<br/>
+          running_loss reset after log
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow" style="margin:8px 0">↓ &nbsp; end of epoch training loop</div>
+
+    <!-- VALIDATION METRICS -->
+    <div class="section-label">⑤ Validation Loss Loop &nbsp;<span style="color:#475569;font-size:9px">(full val set · eval mode · no_grad)</span></div>
+    <div class="row">
+      <div class="card teal col">
+        <div class="card-title">🧮 Metrics Computed</div>
+        <div class="card-body">
+          Same alignment + encoding pipeline as training<br/>
+          predictor.F0Ntrain → decoder → y_rec<br/>
+          NaN in y_rec → skip batch (logged as WARNING)<br/>
+          <div class="tags" style="margin-top:5px">
+            <span class="tag tag-teal">STFT mel loss</span>
+            <span class="tag tag-amber">duration L1</span>
+            <span class="tag tag-teal">F0 L1 / 10</span>
+          </div>
+          <div style="margin-top:5px">Averaged over iters_test batches</div>
+        </div>
+      </div>
+      <div class="card indigo col">
+        <div class="card-title">📊 W&amp;B Eval  <span class="badge badge-purple">step=iters</span> <span class="badge badge-amber">commit=False</span></div>
+        <div class="card-body">
+          <div class="tags">
+            <span class="tag tag-teal">eval/mel_loss</span>
+            <span class="tag tag-teal">eval/dur_loss</span>
+            <span class="tag tag-teal">eval/F0_loss</span>
+          </div>
+          <div style="margin-top:5px; color:#818cf8; font-size:10.5px">commit=False — held in buffer until audio table is ready, then all flushed atomically</div>
+        </div>
+      </div>
+      <div class="card gray col">
+        <div class="card-title">📈 TensorBoard Eval</div>
+        <div class="card-body">
+          <div class="tags">
+            <span class="tag tag-gray">eval/mel_loss</span>
+            <span class="tag tag-gray">eval/dur_loss</span>
+            <span class="tag tag-gray">eval/F0_loss</span>
+          </div>
+          <div style="margin-top:5px; font-size:10.5px">step = epoch+1</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow" style="margin:8px 0">↓</div>
+
+    <!-- VALIDATION INFERENCE -->
+    <div class="section-label">⑥ Validation Inference — run_validation_inference() &nbsp;<span style="color:#475569;font-size:9px">(from infer_start_epoch)</span></div>
+    <div class="card pink">
+      <div class="card-title">🎵 Full synthesis pass on validation set → audio files + routing CSV + W&amp;B Audio table</div>
+      <div class="card-body">
+        <div class="row" style="gap:18px; flex-wrap:wrap; margin-top:4px">
+          <div style="flex:1; min-width:220px">
+            <div style="color:#f9a8d4; font-weight:600; margin-bottom:4px">Synthesis pipeline per batch:</div>
+            text_aligner → attention → text_encoder → BERT<br/>
+            → predictor → style_encoder → predictor_encoder<br/>
+            → F0Ntrain → decoder → y_rec<br/>
+            batch_mel_loss = stft_loss(y_rec, wav_gt)
+          </div>
+          <div style="flex:1; min-width:220px">
+            <div style="color:#f9a8d4; font-weight:600; margin-bottom:4px">Disk output structure:</div>
+            <span class="mono">log_dir/Output/Epoch_XXXX/</span><br/>
+            &nbsp;├ <span class="mono">generated_batchNNN_sampleNN.wav</span> ← every epoch<br/>
+            &nbsp;└ <span class="mono">reference_batchNNN_sampleNN.wav</span> ← first epoch only<br/>
+            <div style="margin-top:5px; color:#9d174d; font-size:10.5px">References saved once to avoid duplicating identical files across all epochs — CSV still points to correct path</div>
+          </div>
+          <div style="flex:1; min-width:220px">
+            <div style="color:#f9a8d4; font-weight:600; margin-bottom:4px">Routing CSV (appended each epoch):</div>
+            <span class="mono">validation_routing.csv</span><br/>
+            epoch · batch_idx · sample_idx<br/>
+            mel_loss · generated_path · reference_path<br/>
+            <div style="margin-top:5px">Relative paths → portable if log_dir moves</div>
+            <div style="color:#f9a8d4; font-weight:600; margin-top:8px; margin-bottom:4px">W&amp;B Audio Table:</div>
+            Up to max_wandb_audio_samples clips uploaded as wandb.Audio (generated vs reference side-by-side) per epoch<br/>
+            Keyed as <span class="mono">val_inference/audio_epoch_N</span>
+          </div>
+        </div>
+        <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #4a0e2a; font-size:10.5px">
+          eval/infer_mel_loss → W&amp;B (step=iters) + TensorBoard (step=epoch+1) · wandb.log({}, commit=True) flushes all pending epoch metrics atomically
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow" style="margin:8px 0">↓</div>
+
+    <!-- CHECKPOINTING -->
+    <div class="section-label">⑦ Model Checkpointing</div>
+    <div class="row">
+      <div class="card green col">
+        <div class="card-title">💾 Periodic Checkpoint <span class="badge badge-amber">every save_freq epochs</span></div>
+        <div class="card-body">
+          <span class="mono">epoch_2nd_XXXXX.pth</span><br/>
+          State: net (all modules) · optimizer · iters · val_loss · epoch<br/>
+          Verified: <span class="mono">os.path.exists()</span> logged after save
+        </div>
+      </div>
+      <div class="card green col">
+        <div class="card-title">🏆 Best Model <span class="badge badge-green">when val_loss improves</span></div>
+        <div class="card-body">
+          <span class="mono">best_model.pth</span> — always overwritten<br/>
+          W&amp;B summary: <span class="mono">best_val_mel_loss</span> + <span class="mono">best_epoch</span><br/>
+          <div style="margin-top:3px; font-size:10.5px; color:#16a34a">Summary metrics visible in W&amp;B run comparison table across all runs</div>
+        </div>
+      </div>
+      <div class="card amber col">
+        <div class="card-title">⚙ Sigma Update</div>
+        <div class="card-body">
+          Running mean of batch sigma_data estimates<br/>
+          Written back into YAML config file<br/>
+          Next run starts with warm sigma_data for diffusion normalisation
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end epoch-box -->
+
+  <div class="arrow">↓ &nbsp; all epochs complete</div>
+
+  <!-- CLEANUP -->
+  <div class="section-label">⑧ Cleanup</div>
+  <div class="row">
+    <div class="card gray col">
+      <div class="card-title">🧹 writer.close()</div>
+      <div class="card-body">Flushes and closes TensorBoard SummaryWriter — prevents incomplete event files</div>
+    </div>
+    <div class="card indigo col">
+      <div class="card-title">✅ wandb.finish()</div>
+      <div class="card-body">Flushes all remaining metrics to W&amp;B, marks run status as Finished in dashboard</div>
+    </div>
+    <div class="card gray col">
+      <div class="card-title">📝 Logger</div>
+      <div class="card-body">"Training complete." written to both stdout handler and <span class="mono">train.log</span> file</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

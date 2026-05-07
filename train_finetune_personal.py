@@ -306,10 +306,10 @@ def run_validation_inference(
                 wandb.Audio(gen_np, sample_rate=sr, caption=f"ep{epoch+1}_gen_{idx}"),
                 wandb.Audio(ref_np, sample_rate=sr, caption=f"ep{epoch+1}_ref_{idx}"),
             )
-            wandb_run.log(
-                {f"val_inference/audio_epoch_{epoch+1}": audio_table},
-                commit=False,
-            )
+        wandb_run.log(
+            {f"val_inference/audio_epoch_{epoch+1}": audio_table},
+            commit=False,
+        )
 
     logger.info(
         f"[Inference] Epoch {epoch+1}: avg mel loss = {avg_mel_loss:.5f}, "

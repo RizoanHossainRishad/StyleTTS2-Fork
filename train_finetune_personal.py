@@ -764,6 +764,31 @@ def main(config_path):
                     loss_params.lambda_s2s * loss_s2s
             
             running_loss += loss_mel.item()
+            # ── Pre-backward shape + NaN diagnostic ─────────────────────────
+            
+            _diag = {
+                "t_en":           t_en,
+                "s2s_attn":       s2s_attn,
+                "s2s_attn_mono":  s2s_attn_mono,
+                "asr":            asr,
+                "en":             en,
+                "p_en":           p_en,
+                "F0_fake":        F0_fake,
+                "N_fake":         N_fake,
+                "y_rec":          y_rec,
+                "s":              s,
+                "s_dur":          s_dur,
+            }
+            for _name, _t in _diag.items():
+                if isinstance(_t, torch.Tensor):
+                    _has_nan = torch.isnan(_t).any().item()
+                    _has_inf = torch.isinf(_t).any().item()
+                    logger.debug(
+                        f"[PRE-BWD] {_name:20s} shape={str(_t.shape):30s} "
+                        f"dtype={_t.dtype}  nan={_has_nan}  inf={_has_inf}  "
+                        f"min={_t.float().min().item():.4f}  max={_t.float().max().item():.4f}"
+                    )
+
             g_loss.backward()
             if torch.isnan(g_loss):
                 from IPython.core.debugger import set_trace
@@ -947,6 +972,7 @@ def main(config_path):
                     wav = []
 
                     for bib in range(len(mel_input_length)):
+                        mel_length = int(mel_input_length[bib].item() / 2)
                         if mel_length <= mel_len:
                             continue
 

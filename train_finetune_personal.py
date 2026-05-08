@@ -947,6 +947,7 @@ def main(config_path):
                     wav = []
 
                     for bib in range(len(mel_input_length)):
+                        mel_length = int(mel_input_length[bib].item() / 2)
                         if mel_length <= mel_len:
                             continue
 

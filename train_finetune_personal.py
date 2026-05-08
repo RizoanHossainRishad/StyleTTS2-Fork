@@ -8,14 +8,14 @@ from munch import Munch
 import numpy as np
 
 
-#os.environ["OMP_NUM_THREADS"] = "4"
-#os.environ["MKL_NUM_THREADS"] = "4"
-#os.environ["OPENBLAS_NUM_THREADS"] = "4"
-#os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
-#os.environ["NUMEXPR_NUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+os.environ["NUMEXPR_NUM_THREADS"] = "4"
 import torch
 # Limit PyTorch's CPU thread usage to prevent the server from getting stuck
-#torch.set_num_threads(4)
+torch.set_num_threads(4)
 
 
 from torch import nn
@@ -1071,9 +1071,9 @@ def main(config_path):
             save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
             torch.save(state, save_path)
 
-            logger.info("[DEBUG] torch.save completed successfully")
+            #logger.info("[DEBUG] torch.save completed successfully")
 
-            logger.info(f'[Save] Periodic checkpoint → {save_path}')
+            #logger.info(f'[Save] Periodic checkpoint → {save_path}')
             # 🔴 DEBUG: verify checkpoint was actually written
             if os.path.exists(save_path):
                 logger.info(f"[Save OK] Checkpoint successfully written → {save_path}")
@@ -1086,11 +1086,11 @@ def main(config_path):
                 best_path = osp.join(log_dir, 'best_model.pth')
                 torch.save(state, best_path)
                 # 🔴 DEBUG: verify checkpoint was actually written
-                if os.path.exists(save_path):
-                    logger.info(f"[Save OK] Checkpoint successfully written → {save_path}")
+                if os.path.exists(best_path):          # ← FIXED: now correctly checks best_path
+                    logger.info(f"[Save OK] Best model written → {best_path} (val_loss={to_scalar(best_loss):.5f})")
                 else:
-                    logger.error(f"[Save FAIL] Checkpoint NOT found after saving → {save_path}")
-                logger.info(f'[Save] New best val loss {best_loss:.5f} → {best_path}')
+                    logger.error(f"[Save FAIL] Best model NOT found after saving → {best_path}")
+                #logger.info(f'[Save] New best val loss {best_loss:.5f} → {best_path}')
                 # Summary metrics persist across steps in W&B run comparison table
                 wandb.run.summary["best_val_mel_loss"] = to_scalar(best_loss)
                 wandb.run.summary["best_epoch"]        = epoch + 1

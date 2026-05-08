@@ -1,0 +1,1803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StyleTTS2 Fine-Tuning — Deep Code Review</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:          #0d0f14;
+    --surface:     #13161e;
+    --surface2:    #1a1e2a;
+    --border:      #252a38;
+    --accent:      #4fffb0;
+    --accent2:     #ff6b6b;
+    --accent3:     #7eb8ff;
+    --accent4:     #ffd166;
+    --text:        #d4dae8;
+    --text-muted:  #6b748a;
+    --text-bright: #ffffff;
+    --code-bg:     #0a0c10;
+    --good:        #4fffb0;
+    --warn:        #ffd166;
+    --bad:         #ff6b6b;
+    --info:        #7eb8ff;
+    --radius:      6px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    min-height: 100vh;
+  }
+
+  /* ── HERO ──────────────────────────────────────────────── */
+  .hero {
+    position: relative;
+    padding: 80px 60px 60px;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 80% 20%, rgba(78,255,176,0.06) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 60% at 10% 80%, rgba(126,184,255,0.05) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-tag {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .hero-tag::before {
+    content: '';
+    display: inline-block;
+    width: 24px; height: 1px;
+    background: var(--accent);
+  }
+  .hero h1 {
+    font-family: 'DM Serif Display', serif;
+    font-size: clamp(2.2rem, 4vw, 3.5rem);
+    color: var(--text-bright);
+    line-height: 1.15;
+    max-width: 700px;
+    margin-bottom: 20px;
+  }
+  .hero h1 em {
+    font-style: italic;
+    color: var(--accent);
+  }
+  .hero-sub {
+    color: var(--text-muted);
+    max-width: 600px;
+    font-size: 14px;
+  }
+  .hero-meta {
+    display: flex;
+    gap: 24px;
+    margin-top: 36px;
+    flex-wrap: wrap;
+  }
+  .meta-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    padding: 6px 14px;
+    border-radius: 2px;
+  }
+  .meta-chip span { color: var(--text-bright); }
+
+  /* ── LAYOUT ─────────────────────────────────────────────── */
+  .wrapper {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 40px 80px;
+  }
+
+  /* ── TOC ─────────────────────────────────────────────────── */
+  .toc {
+    margin: 48px 0 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 8px 32px;
+  }
+  .toc-title {
+    grid-column: 1 / -1;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .toc a:hover { color: var(--accent); border-color: var(--accent); }
+  .toc a .num {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    width: 20px;
+    flex-shrink: 0;
+  }
+
+  /* ── SECTION ─────────────────────────────────────────────── */
+  .section {
+    margin-top: 64px;
+    scroll-margin-top: 24px;
+  }
+  .section-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    margin-bottom: 32px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-num {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    margin-top: 6px;
+    flex-shrink: 0;
+  }
+  .section h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.9rem;
+    color: var(--text-bright);
+    line-height: 1.2;
+  }
+  .section h2 .sub {
+    display: block;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  /* ── CARDS ───────────────────────────────────────────────── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    position: relative;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #353c52; }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 100%;
+    border-radius: var(--radius) 0 0 var(--radius);
+  }
+  .card.good::before  { background: var(--good); }
+  .card.warn::before  { background: var(--warn); }
+  .card.bad::before   { background: var(--bad); }
+  .card.info::before  { background: var(--info); }
+
+  .card-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .card.good  .card-label { color: var(--good); }
+  .card.warn  .card-label { color: var(--warn); }
+  .card.bad   .card-label { color: var(--bad); }
+  .card.info  .card-label { color: var(--info); }
+
+  .card h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+  }
+  .card p {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  /* ── ANALYSIS BLOCKS ─────────────────────────────────────── */
+  .analysis-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .analysis-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 24px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+  .badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .badge-good  { background: rgba(79,255,176,0.12); color: var(--good);  border: 1px solid rgba(79,255,176,0.3); }
+  .badge-warn  { background: rgba(255,209,102,0.12); color: var(--warn); border: 1px solid rgba(255,209,102,0.3); }
+  .badge-bad   { background: rgba(255,107,107,0.12); color: var(--bad);  border: 1px solid rgba(255,107,107,0.3); }
+  .badge-info  { background: rgba(126,184,255,0.12); color: var(--info); border: 1px solid rgba(126,184,255,0.3); }
+  .badge-idea  { background: rgba(200,150,255,0.12); color: #c89eff;     border: 1px solid rgba(200,150,255,0.3); }
+
+  .analysis-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-bright);
+  }
+  .analysis-body {
+    padding: 20px 24px;
+  }
+  .analysis-body p {
+    font-size: 13.5px;
+    color: var(--text);
+    line-height: 1.75;
+    margin-bottom: 12px;
+  }
+  .analysis-body p:last-child { margin-bottom: 0; }
+
+  /* ── CODE BLOCKS ─────────────────────────────────────────── */
+  .code-wrap {
+    margin: 16px 0;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .code-label {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 6px 16px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .code-label.current::before { content: '● CURRENT'; color: var(--bad); }
+  .code-label.improved::before { content: '● IMPROVED'; color: var(--good); }
+  .code-label.neutral::before { content: '● CODE'; color: var(--info); }
+  pre {
+    background: var(--code-bg);
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  code { font-family: 'Space Mono', monospace; font-size: 12px; }
+  .hl-green  { color: #4fffb0; }
+  .hl-red    { color: #ff6b6b; }
+  .hl-yellow { color: #ffd166; }
+  .hl-blue   { color: #7eb8ff; }
+  .hl-purple { color: #c89eff; }
+  .hl-gray   { color: #6b748a; }
+  .hl-white  { color: #ffffff; }
+
+  /* ── COMPARISON TABLE ────────────────────────────────────── */
+  .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin: 20px 0;
+  }
+  .comparison-table th {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--surface2);
+    padding: 10px 16px;
+    text-align: left;
+    border: 1px solid var(--border);
+  }
+  .comparison-table td {
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--text);
+    background: var(--surface);
+  }
+  .comparison-table tr:hover td { background: var(--surface2); }
+  .t-good  { color: var(--good);  font-weight: 600; }
+  .t-bad   { color: var(--bad);   font-weight: 600; }
+  .t-warn  { color: var(--warn);  font-weight: 600; }
+  .t-info  { color: var(--info);  font-weight: 600; }
+
+  /* ── FLOW DIAGRAM ────────────────────────────────────────── */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 20px 0;
+  }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .flow-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .flow-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: 6px;
+    flex-shrink: 0;
+  }
+  .flow-connector {
+    width: 1px;
+    flex: 1;
+    min-height: 20px;
+    background: var(--border);
+  }
+  .flow-content {
+    padding-bottom: 20px;
+    flex: 1;
+  }
+  .flow-content strong {
+    display: block;
+    font-size: 13px;
+    color: var(--text-bright);
+    margin-bottom: 4px;
+  }
+  .flow-content p {
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+
+  /* ── METRIC SCOREBOARD ───────────────────────────────────── */
+  .scoreboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+    margin: 20px 0;
+  }
+  .score-cell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+  }
+  .score-val {
+    font-family: 'DM Serif Display', serif;
+    font-size: 2.2rem;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .score-val.green { color: var(--good); }
+  .score-val.red   { color: var(--bad); }
+  .score-val.yellow { color: var(--warn); }
+  .score-val.blue  { color: var(--info); }
+  .score-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  /* ── INLINE CODE ─────────────────────────────────────────── */
+  .ic {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--accent3);
+  }
+
+  /* ── DIVIDER ─────────────────────────────────────────────── */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* ── INNOVATIONS BOX ─────────────────────────────────────── */
+  .innovations {
+    border: 1px solid rgba(200,158,255,0.25);
+    background: rgba(200,158,255,0.04);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    margin-top: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .innovations::before {
+    content: 'INNOVATION IDEAS';
+    position: absolute;
+    top: -1px; right: 0;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 3px;
+    padding: 4px 12px;
+    background: rgba(200,158,255,0.15);
+    color: #c89eff;
+    border-bottom-left-radius: var(--radius);
+    border: 1px solid rgba(200,158,255,0.25);
+    border-top: none; border-right: none;
+  }
+  .innovations h3 {
+    color: #c89eff;
+    font-size: 15px;
+    margin-bottom: 10px;
+    margin-top: 20px;
+  }
+  .innovations h3:first-of-type { margin-top: 8px; }
+  .innovations p {
+    font-size: 13.5px;
+    color: var(--text);
+    line-height: 1.75;
+    margin-bottom: 8px;
+  }
+
+  /* ── UL LISTS ────────────────────────────────────────────── */
+  ul.review-list {
+    list-style: none;
+    padding: 0;
+    margin: 12px 0;
+  }
+  ul.review-list li {
+    font-size: 13.5px;
+    color: var(--text);
+    padding: 5px 0 5px 20px;
+    position: relative;
+    line-height: 1.7;
+  }
+  ul.review-list li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+  }
+  ul.review-list.warn li::before { color: var(--warn); }
+  ul.review-list.bad  li::before { color: var(--bad); }
+  ul.review-list.info li::before { color: var(--info); }
+  ul.review-list.idea li::before { content: '✦'; color: #c89eff; }
+
+  /* ── FOOTER ──────────────────────────────────────────────── */
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 32px 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--text-muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════ HERO ══════════════════════════════ -->
+<div class="hero">
+  <div class="hero-tag">Deep Code Review</div>
+  <h1>StyleTTS2 Fine-Tune<br><em>train_finetune_regular_wandb.py</em></h1>
+  <p class="hero-sub">
+    A thorough, annotated review of every architectural decision — environment setup, training loop,
+    validation inference, checkpoint logic, and W&amp;B integration — with justifications,
+    improvement proposals, and novel ideas.
+  </p>
+  <div class="hero-meta">
+    <div class="meta-chip">File <span>train_finetune_regular_wandb.py</span></div>
+    <div class="meta-chip">Framework <span>PyTorch 2.x + torchaudio</span></div>
+    <div class="meta-chip">Tracking <span>W&amp;B + TensorBoard</span></div>
+    <div class="meta-chip">Launch <span>CUDA_VISIBLE_DEVICES=0</span></div>
+    <div class="meta-chip">Stage <span>Second-stage fine-tune</span></div>
+  </div>
+</div>
+
+<div class="wrapper">
+
+  <!-- TOC -->
+  <nav class="toc">
+    <div class="toc-title">Table of Contents</div>
+    <a href="#s1"><span class="num">01</span> Thread / CPU Pinning</a>
+    <a href="#s2"><span class="num">02</span> Environment &amp; .env Loading</a>
+    <a href="#s3"><span class="num">03</span> W&amp;B Integration Architecture</a>
+    <a href="#s4"><span class="num">04</span> Helper Utilities</a>
+    <a href="#s5"><span class="num">05</span> run_validation_inference()</a>
+    <a href="#s6"><span class="num">06</span> Main — Config &amp; Dataloader Setup</a>
+    <a href="#s7"><span class="num">07</span> Model Construction &amp; DataParallel</a>
+    <a href="#s8"><span class="num">08</span> Optimizer &amp; Scheduler Strategy</a>
+    <a href="#s9"><span class="num">09</span> Training Loop — Forward Pass</a>
+    <a href="#s10"><span class="num">10</span> Loss Landscape</a>
+    <a href="#s11"><span class="num">11</span> Gradient Flow &amp; NaN Guards</a>
+    <a href="#s12"><span class="num">12</span> Checkpoint &amp; Best-Model Logic</a>
+    <a href="#s13"><span class="num">13</span> Validation Loop</a>
+    <a href="#s14"><span class="num">14</span> Bugs, Risks &amp; Critical Fixes</a>
+    <a href="#s15"><span class="num">15</span> Innovation Ideas</a>
+    <a href="#s16"><span class="num">16</span> Summary Scorecard</a>
+  </nav>
+
+  <!-- ══ SECTION 1 ══ -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <div class="section-num">01</div>
+      <h2><span class="sub">Environment Bootstrap</span>Thread & CPU Pinning</h2>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">Why these env vars must be set BEFORE any import</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          The five <span class="ic">OMP/MKL/OPENBLAS/VECLIB/NUMEXPR_NUM_THREADS = "4"</span> lines at the
+          very top of the file are a deliberate and important bootstrap ritual. Libraries like NumPy (OpenBLAS
+          backend), MKL, and OpenMP read these environment variables <em>once</em> on their first import and then
+          lock the thread pool size permanently. Placing the assignments before any import guarantees the cap is
+          honoured; placing them after would silently have no effect.
+        </p>
+        <p>
+          The same logic applies to <span class="ic">torch.set_num_threads(4)</span>. PyTorch's CPU inter-op
+          thread pool is initialised lazily on first use, so calling this before the first tensor op is
+          sufficient — but doing it right after the torch import is the safest, most readable position.
+        </p>
+        <p>
+          <strong>Why cap at 4?</strong> On a multi-GPU server the OS may schedule dozens of Python workers.
+          Without a thread cap, each worker spawns up to <em>N_cpu</em> BLAS threads, creating a "thread storm"
+          that saturates the CPU scheduler, causes context-switch overhead larger than the computation itself,
+          and can deadlock GPU–CPU memory transfers via DMA. 4 is a pragmatic default that leaves headroom for
+          the OS and other workers.
+        </p>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label neutral">thread pinning — correct pattern</div>
+      <pre><span class="hl-gray"># Must happen before ANY library import that touches BLAS/OpenMP</span>
+<span class="hl-green">import os</span>
+<span class="hl-yellow">os.environ["OMP_NUM_THREADS"]         = "4"</span>   <span class="hl-gray"># OpenMP (used by PyTorch CPU ops, sklearn…)</span>
+<span class="hl-yellow">os.environ["MKL_NUM_THREADS"]         = "4"</span>   <span class="hl-gray"># Intel MKL (NumPy on MKL build)</span>
+<span class="hl-yellow">os.environ["OPENBLAS_NUM_THREADS"]    = "4"</span>   <span class="hl-gray"># NumPy default backend</span>
+<span class="hl-yellow">os.environ["VECLIB_MAXIMUM_THREADS"]  = "4"</span>   <span class="hl-gray"># macOS Accelerate framework</span>
+<span class="hl-yellow">os.environ["NUMEXPR_NUM_THREADS"]     = "4"</span>   <span class="hl-gray"># numexpr (Pandas, etc.)</span>
+<span class="hl-green">import torch</span>
+<span class="hl-yellow">torch.set_num_threads(4)</span>                       <span class="hl-gray"># PyTorch CPU-side thread pool</span></pre>
+    </div>
+
+    <div class="card-grid" style="margin-top:16px;">
+      <div class="card warn">
+        <div class="card-label">Improvement</div>
+        <h3>Make thread count configurable</h3>
+        <p>Hard-coding 4 means the same file must be edited for every machine. Read from config YAML or a
+        <span class="ic">CPU_THREADS</span> env var with a fallback of 4.</p>
+      </div>
+      <div class="card info">
+        <div class="card-label">Note</div>
+        <h3>CUDA_LAUNCH_BLOCKING=1 in launch command</h3>
+        <p>You set this in the shell command, not in the script. Good practice — it forces synchronous CUDA
+        kernel launches which makes stack traces point to the real line but slows training ~5–10×. Remove it
+        for production runs.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 2 ══ -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <div class="section-num">02</div>
+      <h2><span class="sub">Security & Portability</span>Environment & .env Loading</h2>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">WELL DESIGNED</span>
+        <span class="analysis-title">Absolute path resolution for .env</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">osp.join(osp.dirname(osp.abspath(__file__)), "Configs", ".env")</span>
+          builds the path relative to the <em>script's location</em>, not the current working directory.
+          This is critical: if the script is launched from <span class="ic">/workspace</span> via a
+          shell alias or a scheduler (SLURM/tmux), <span class="ic">os.getcwd()</span> would be wrong,
+          but <span class="ic">__file__</span> is always the script's own absolute path.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-warn">IMPORTANT DETAIL</span>
+        <span class="analysis-title">HOME redirect & writable W&B cache</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          Many GPU servers mount home directories over NFS or restrict write access. W&B tries to write
+          a <span class="ic">.netrc</span> file to <span class="ic">$HOME</span> and uses
+          <span class="ic">WANDB_CONFIG_DIR</span> for its sqlite state database. If either write fails,
+          the entire training run crashes — after hours of data loading — with a cryptic
+          <span class="ic">FileNotFoundError</span>.
+        </p>
+        <p>
+          The code redirects both to <span class="ic">/workspace/rizoan/StyleTTS2-Fork/wandb_cache</span>
+          which is a local SSD path. The <span class="ic">os.makedirs(..., exist_ok=True)</span> call
+          ensures it is created on first run. This is the correct defensive pattern.
+        </p>
+        <p>
+          <strong>Risk:</strong> The path is hard-coded. Another developer cloning this repo will hit a
+          permission error. The fix is to derive this from <span class="ic">log_dir</span> (already
+          a config value) or from a <span class="ic">WANDB_CACHE</span> env var.
+        </p>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label current">current — hard-coded server path</div>
+      <pre><span class="hl-red">_wandb_cache_dir = "/workspace/rizoan/StyleTTS2-Fork/wandb_cache"</span>
+<span class="hl-red">os.environ["HOME"] = "/workspace/rizoan"</span></pre>
+    </div>
+    <div class="code-wrap">
+      <div class="code-label improved">improved — portable, derived from config</div>
+      <pre><span class="hl-gray"># Compute once after config is loaded (move these lines inside main())</span>
+<span class="hl-green">_wandb_cache_dir = os.getenv(
+    "WANDB_CACHE",
+    osp.join(osp.dirname(osp.abspath(__file__)), "wandb_cache")
+)</span>
+<span class="hl-green">os.makedirs(_wandb_cache_dir, exist_ok=True)
+os.environ["WANDB_CONFIG_DIR"] = _wandb_cache_dir
+os.environ["WANDB_DIR"]        = _wandb_cache_dir
+<span class="hl-gray"># Don't override HOME globally — use NETRC instead</span>
+os.environ["NETRC"] = osp.join(_wandb_cache_dir, ".netrc")</span></pre>
+    </div>
+
+    <div class="analysis-block" style="margin-top:16px;">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">Import wandb AFTER env vars — critical ordering</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          The comment in the code explains this precisely: Python module-level code runs at import time.
+          <span class="ic">wandb</span> reads <span class="ic">WANDB_API_KEY</span>, 
+          <span class="ic">WANDB_DIR</span>, and <span class="ic">WANDB_CONFIG_DIR</span> as soon as
+          the module is imported — not when <span class="ic">wandb.init()</span> is called. Placing
+          all <span class="ic">os.environ</span> assignments before <span class="ic">import wandb</span>
+          is therefore mandatory, not optional.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 3 ══ -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <div class="section-num">03</div>
+      <h2><span class="sub">Experiment Tracking</span>W&B Integration Architecture</h2>
+    </div>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+        <div class="flow-content">
+          <strong>wandb.login()</strong>
+          <p>Reads WANDB_API_KEY from os.environ — no .netrc write needed, avoids HOME permission issues.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+        <div class="flow-content">
+          <strong>wandb.init(project=..., config=config, resume="allow")</strong>
+          <p>Passes the full YAML dict as hyperparameters. resume="allow" enables crash recovery.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+        <div class="flow-content">
+          <strong>Training step: wandb.log({...}, step=iters, commit=True)</strong>
+          <p>Logs all training losses every log_interval steps with global step for aligned x-axis.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+        <div class="flow-content">
+          <strong>End of epoch: wandb.log({eval/...}, commit=False)</strong>
+          <p>Accumulates eval metrics. commit=False holds the buffer open for the audio table.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+        <div class="flow-content">
+          <strong>run_validation_inference() → audio table upload</strong>
+          <p>Generates WAV files, uploads to W&B Audio table. Also commits=False.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-line"><div class="flow-dot"></div><div class="flow-connector"></div></div>
+        <div class="flow-content">
+          <strong>wandb.log({}, commit=True)</strong>
+          <p>Final flush — all pending end-of-epoch metrics land as one atomic W&B step.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-line"><div class="flow-dot" style="background:var(--accent2)"></div></div>
+        <div class="flow-content">
+          <strong>wandb.finish()</strong>
+          <p>Flushes remaining data and marks the run complete. Missing this can leave orphaned runs.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-grid">
+      <div class="card good">
+        <div class="card-label">Correct</div>
+        <h3>commit=False batching</h3>
+        <p>Multiple <span class="ic">wandb.log</span> calls with <span class="ic">commit=False</span>
+        then a final <span class="ic">commit=True</span> sends all end-of-epoch data atomically — no partial
+        rows in the W&B table.</p>
+      </div>
+      <div class="card good">
+        <div class="card-label">Correct</div>
+        <h3>resume="allow"</h3>
+        <p>Allows the same W&B run to be continued after a crash. Metrics curves remain unbroken. Without
+        this, restarts produce duplicate runs.</p>
+      </div>
+      <div class="card warn">
+        <div class="card-label">Risk</div>
+        <h3>step=iters misalignment</h3>
+        <p>Training logs use <span class="ic">step=iters</span> (global step), eval logs also use
+        <span class="ic">step=iters</span>. This works but can create sparse eval points on the x-axis.
+        Consider logging eval with <span class="ic">step=epoch+1</span> on a separate axis.</p>
+      </div>
+      <div class="card warn">
+        <div class="card-label">Risk</div>
+        <h3>Audio quota</h3>
+        <p>W&B free tier has a 5 GB media cap. Even at 2 clips × 24 kHz × 16-bit ≈ 2 MB/epoch,
+        100 epochs = 200 MB just for audio. Monitor the project storage page.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 4 ══ -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <div class="section-num">04</div>
+      <h2><span class="sub">Module-level Utilities</span>Helper Functions</h2>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">WELL PLACED</span>
+        <span class="analysis-title">to_scalar() — why this exists and where to use it</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          Most losses start as integer <span class="ic">0</span> before their training stage activates
+          (e.g. <span class="ic">loss_sty = 0</span> before <span class="ic">diff_epoch</span>).
+          Later they become <span class="ic">torch.Tensor</span>. Calling
+          <span class="ic">wandb.log()</span> with a tensor works <em>sometimes</em> but is fragile —
+          W&B may log the tensor's device string instead of the float value on some versions.
+        </p>
+        <p>
+          <span class="ic">to_scalar()</span> wraps both cases uniformly. Defined at module level
+          (not inside the hot training loop) means Python does not re-create the function object every
+          iteration — a small but measurable saving across tens of thousands of iterations.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">save_audio() — shape contract documentation</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">torchaudio.save()</span> requires shape <span class="ic">(C, T)</span> — channels
+          first. The model decoder outputs <span class="ic">(B, 1, T)</span> so callers index into the batch
+          dimension first: <span class="ic">y_rec[sample_idx]</span> gives <span class="ic">(1, T)</span>.
+          The helper's <span class="ic">unsqueeze(0)</span> also handles the 1-D edge case
+          <span class="ic">(T,) → (1, T)</span>. The docstring makes this contract explicit — essential for
+          future contributors.
+        </p>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label improved">potential improvement — add sample rate to signature docs</div>
+      <pre><span class="hl-blue">def</span> <span class="hl-green">save_audio</span>(path: str, waveform: torch.Tensor, sample_rate: int) -> <span class="hl-blue">None</span>:
+    <span class="hl-yellow">"""Save waveform to WAV.
+    
+    Args:
+        path:        Destination file path (parent dir must exist).
+        waveform:    Shape (C,T) or (T,) — channels-first or mono 1-D.
+        sample_rate: e.g. 24000 for StyleTTS2 default.
+    
+    Note:
+        Decoder output is (B,1,T). Index batch dim before calling:
+        save_audio(path, y_rec[i], sr)  # y_rec[i] is (1,T)
+    """</span>
+    wav = waveform.detach().cpu()
+    <span class="hl-blue">if</span> wav.ndim == 1:
+        wav = wav.unsqueeze(0)
+    torchaudio.save(path, wav, sample_rate)</pre>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 5 ══ -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <div class="section-num">05</div>
+      <h2><span class="sub">Audio Generation & Logging</span>run_validation_inference()</h2>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">GOOD DESIGN</span>
+        <span class="analysis-title">Reference WAV written only on first inference epoch</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          The reference (ground-truth) audio for a given validation sample is <em>identical across all
+          epochs</em> — only the generated audio changes. Writing the reference once (on
+          <span class="ic">infer_start_epoch</span>) and then pointing every subsequent epoch's CSV row
+          to that first-epoch copy prevents N duplicates of the same file across N epochs. The savings
+          on a 100-epoch run with a large validation set can easily exceed 10 GB.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-warn">BUG / RISK</span>
+        <span class="analysis-title">mel_len computed from min length — can produce zero-length segments</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">mel_len = int(mel_input_length.min().item() / 2 - 1)</span>
+          If the shortest mel in the batch is very short (e.g. 4 frames), <span class="ic">mel_len</span>
+          becomes 1 or even 0. The downstream <span class="ic">random_start = np.random.randint(0, mel_length - mel_len)</span>
+          then calls <span class="ic">randint(0, 0)</span> which raises a ValueError. This silently gets
+          swallowed by the outer <span class="ic">except Exception</span> clause.
+        </p>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label current">current — no guard on mel_len</div>
+      <pre><span class="hl-red">mel_len = int(mel_input_length.min().item() / 2 - 1)</span>
+<span class="hl-gray">...
+rstart = np.random.randint(0, mel_length - mel_len)  # ValueError if mel_len >= mel_length</span></pre>
+    </div>
+    <div class="code-wrap">
+      <div class="code-label improved">fixed — early guard</div>
+      <pre><span class="hl-green">mel_len = int(mel_input_length.min().item() / 2 - 1)
+if mel_len <= 0:
+    logger.warning(f"[Inference] Batch {batch_idx}: mel_len={mel_len} <= 0, skipping")
+    continue</span></pre>
+    </div>
+
+    <div class="analysis-block" style="margin-top:16px;">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">CSV routing table design</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          The CSV schema <span class="ic">[epoch, batch_idx, sample_idx, mel_loss, generated_path, reference_path]</span>
+          is a sensible audit log. Relative paths (via <span class="ic">osp.relpath</span>) keep the file
+          portable — the log directory can be moved without breaking every path in the CSV.
+        </p>
+        <p>
+          <strong>Issue:</strong> The file handle <span class="ic">csv_file</span> is opened at the top
+          of the function and closed at the bottom. If an exception escapes before <span class="ic">csv_file.close()</span>
+          the file stays open (and the final bytes may not flush). Use a context manager:
+        </p>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label improved">use context manager to guarantee flush/close</div>
+      <pre><span class="hl-blue">with</span> <span class="hl-green">open</span>(csv_path, <span class="hl-yellow">"a"</span>, newline=<span class="hl-yellow">""</span>, encoding=<span class="hl-yellow">"utf-8"</span>) <span class="hl-blue">as</span> csv_file:
+    csv_writer = csv.writer(csv_file)
+    <span class="hl-blue">if</span> write_header:
+        csv_writer.writerow([...])
+    <span class="hl-blue">for</span> batch_idx, batch <span class="hl-blue">in</span> <span class="hl-green">enumerate</span>(val_dataloader):
+        ...
+<span class="hl-gray"># csv_file.close() called automatically, even on exception</span></pre>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 6 ══ -->
+  <div class="section" id="s6">
+    <div class="section-header">
+      <div class="section-num">06</div>
+      <h2><span class="sub">Configuration & Data Pipeline</span>Main — Config & Dataloader Setup</h2>
+    </div>
+
+    <div class="card-grid">
+      <div class="card good">
+        <div class="card-label">Correct</div>
+        <h3>num_workers=0 on both dataloaders</h3>
+        <p>With a single GPU and CUDA tensors being created inside the dataset, using >0 workers would
+        fork subprocesses that each try to initialise their own CUDA context — a deadlock on most setups.
+        0 means data loading happens in the main process, safe but slower.</p>
+      </div>
+      <div class="card warn">
+        <div class="card-label">Consideration</div>
+        <h3>Config copy to log_dir</h3>
+        <p><span class="ic">shutil.copy(config_path, log_dir)</span> is a good reproducibility practice —
+        the config used for this run is preserved alongside the checkpoints. Ensure this happens before
+        any training so a crash doesn't leave a missing config.</p>
+      </div>
+      <div class="card info">
+        <div class="card-label">Design Note</div>
+        <h3>infer_start_epoch semantics</h3>
+        <p>Skipping inference for early epochs (when output is noise) saves disk space. The default 0
+        means always infer. For long runs, set to e.g. 5–10 to skip the "chaotic" early epochs.</p>
+      </div>
+      <div class="card warn">
+        <div class="card-label">Risk</div>
+        <h3>saving_epoch vs save_freq</h3>
+        <p><span class="ic">saving_epoch = config.get('save_freq', 2)</span> is assigned but never used —
+        the checkpoint block uses <span class="ic">save_freq</span> directly. Dead code. Remove it to
+        avoid confusion.</p>
+      </div>
+    </div>
+
+    <div class="analysis-block" style="margin-top:20px;">
+      <div class="analysis-header">
+        <span class="badge badge-info">EXPLAIN</span>
+        <span class="analysis-title">diff_epoch and joint_epoch — staged training schedule</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          StyleTTS2 uses a three-phase training schedule controlled by two epoch thresholds:
+        </p>
+        <ul class="review-list info">
+          <li><strong>Phase 1 (epoch &lt; diff_epoch):</strong> Train without the diffusion module. The style
+          encoder and predictor are warmed up with reconstruction losses only. <span class="ic">loss_sty = 0</span>
+          and <span class="ic">loss_diff = 0</span> during this phase.</li>
+          <li><strong>Phase 2 (diff_epoch ≤ epoch &lt; joint_epoch):</strong> Diffusion module activates. The
+          denoising score matching loss <span class="ic">loss_diff</span> and the style prediction loss
+          <span class="ic">loss_sty</span> become non-zero. The diffusion sampler is used to generate style
+          vectors during forward passes.</li>
+          <li><strong>Phase 3 (epoch ≥ joint_epoch):</strong> SLM adversarial loss activates. The WavLM-based
+          language model discriminator <span class="ic">wl</span> and its adversarial counterpart
+          <span class="ic">slmadv</span> begin updating, aligning prosody at a linguistic representation level.</li>
+        </ul>
+        <p>
+          When loading from a first-stage checkpoint, both thresholds are offset by
+          <span class="ic">start_epoch</span> so that the schedule aligns to the <em>total</em> epochs seen,
+          not the fine-tuning epochs alone.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 7 ══ -->
+  <div class="section" id="s7">
+    <div class="section-header">
+      <div class="section-num">07</div>
+      <h2><span class="sub">Architecture Setup</span>Model Construction & DataParallel</h2>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">MyDataParallel — why it exists</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">torch.nn.DataParallel</span> wraps the model in a way that attribute access
+          goes to the <span class="ic">DataParallel</span> object first, not the underlying module.
+          If any code does <span class="ic">model.decoder.some_custom_attribute</span>, Python raises
+          <span class="ic">AttributeError</span> because <span class="ic">DataParallel</span> doesn't
+          have it.
+        </p>
+        <p>
+          <span class="ic">MyDataParallel</span> overrides <span class="ic">__getattr__</span> to fall
+          through to <span class="ic">self.module</span> (the actual model) on AttributeError. This is
+          the standard, community-accepted fix. The comment in the code correctly identifies this.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-warn">CONSIDERATION</span>
+        <span class="analysis-title">mpd, msd, wd excluded from DataParallel wrap — why</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">mpd</span> (Multi-Period Discriminator), <span class="ic">msd</span>
+          (Multi-Scale Discriminator), and <span class="ic">wd</span> (WavLM Discriminator) are excluded
+          from the DataParallel loop:
+        </p>
+        <div class="code-wrap">
+          <div class="code-label neutral">discriminator exclusion</div>
+          <pre><span class="hl-blue">for</span> key <span class="hl-blue">in</span> model:
+    <span class="hl-blue">if</span> key != <span class="hl-yellow">"mpd"</span> <span class="hl-blue">and</span> key != <span class="hl-yellow">"msd"</span> <span class="hl-blue">and</span> key != <span class="hl-yellow">"wd"</span>:
+        model[key] = MyDataParallel(model[key])</pre>
+        </div>
+        <p>
+          The discriminators are later wrapped separately:
+          <span class="ic">gl = MyDataParallel(gl)</span>, <span class="ic">dl = MyDataParallel(dl)</span>,
+          <span class="ic">wl = MyDataParallel(wl)</span>. The GeneratorLoss and DiscriminatorLoss
+          objects <em>contain</em> the discriminators internally, so wrapping the loss object is
+          equivalent. Wrapping the raw discriminator modules again would double-wrap them.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">predictor_encoder deep-copied from style_encoder after first stage</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">model.predictor_encoder = copy.deepcopy(model.style_encoder)</span>
+          is called after loading the first-stage checkpoint. In the first stage, only
+          <span class="ic">style_encoder</span> is trained; the <span class="ic">predictor_encoder</span>
+          is a separate module that learns to predict prosodic style. Starting from the style encoder's
+          weights (via deep copy) gives it a warm-start instead of random initialisation — a widely
+          used transfer learning trick.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 8 ══ -->
+  <div class="section" id="s8">
+    <div class="section-header">
+      <div class="section-num">08</div>
+      <h2><span class="sub">Learning Rate Strategy</span>Optimizer & Scheduler</h2>
+    </div>
+
+    <table class="comparison-table">
+      <tr>
+        <th>Module</th>
+        <th>LR Source</th>
+        <th>Beta1</th>
+        <th>Beta2</th>
+        <th>Weight Decay</th>
+        <th>Rationale</th>
+      </tr>
+      <tr>
+        <td><span class="ic">bert</span></td>
+        <td class="t-info">bert_lr</td>
+        <td>0.9</td>
+        <td>0.99</td>
+        <td>0.01</td>
+        <td>Standard AdamW for transformers — higher beta1 because BERT is pre-trained and needs gentler updates.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">decoder</span></td>
+        <td class="t-warn">ft_lr</td>
+        <td>0.0</td>
+        <td>0.99</td>
+        <td>1e-4</td>
+        <td>Beta1=0 = RMSProp-like. Used for GAN generator modules to avoid momentum carrying stale discriminator gradients.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">style_encoder</span></td>
+        <td class="t-warn">ft_lr</td>
+        <td>0.0</td>
+        <td>0.99</td>
+        <td>1e-4</td>
+        <td>Same as decoder — fine-tuned module, GAN-adjacent, benefits from RMSProp dynamics.</td>
+      </tr>
+      <tr>
+        <td>All others</td>
+        <td class="t-info">optimizer_params.lr</td>
+        <td>(default)</td>
+        <td>(default)</td>
+        <td>(default)</td>
+        <td>Standard training rate for modules not in a GAN adversarial path.</td>
+      </tr>
+    </table>
+
+    <div class="analysis-block" style="margin-top:20px;">
+      <div class="analysis-header">
+        <span class="badge badge-info">EXPLAIN</span>
+        <span class="analysis-title">scheduler_params_dict — why max_lr is doubled for bert and decoder</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          The OneCycleLR scheduler internally divides <span class="ic">max_lr</span> by a factor (usually 25)
+          to derive the base learning rate. If you want the actual peak LR to be
+          <span class="ic">bert_lr</span>, you need to pass <span class="ic">bert_lr * 2</span> as
+          <span class="ic">max_lr</span> because the scheduler multiplies by
+          <span class="ic">pct_start</span>-related factors. The ×2 is a calibration constant tuned
+          for this model — not arbitrary.
+        </p>
+        <p>
+          <strong>Important:</strong> After <span class="ic">build_optimizer()</span>, the param groups
+          are manually overridden with exact LR/beta values. This means the scheduler's
+          <span class="ic">max_lr</span> is effectively overridden — the manual assignments take
+          precedence over the scheduler dict. This is intentional: the build_optimizer utility is used
+          for the scheduler object setup, while the manual overrides fine-tune the actual starting values.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 9 ══ -->
+  <div class="section" id="s9">
+    <div class="section-header">
+      <div class="section-num">09</div>
+      <h2><span class="sub">Core Training Logic</span>Training Loop — Forward Pass</h2>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-info">EXPLAIN</span>
+        <span class="analysis-title">Coin-flip between soft and monotonic attention</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">if bool(random.getrandbits(1)): asr = t_en @ s2s_attn else: asr = t_en @ s2s_attn_mono</span>
+        </p>
+        <p>
+          The text aligner produces two attention matrices: <span class="ic">s2s_attn</span> (soft,
+          multi-modal) and <span class="ic">s2s_attn_mono</span> (forced monotonic via Viterbi).
+          Using soft attention 50% of the time acts as a <em>stochastic regulariser</em> — the decoder
+          cannot overfit to a single alignment mode. Monotonic attention is used exclusively during
+          validation (consistent, deterministic) which is why you see no coin flip in the val loop.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-info">EXPLAIN</span>
+        <span class="analysis-title">Random crop of mel and waveform — why and the 300× factor</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          Training on full-length utterances is memory-prohibitive. Instead, a random contiguous segment
+          of <span class="ic">mel_len</span> frames is cropped from each utterance. The same temporal
+          position is extracted from the waveform using the relationship:
+        </p>
+        <div class="code-wrap">
+          <div class="code-label neutral">coordinate mapping between mel frames and waveform samples</div>
+          <pre><span class="hl-gray"># mel frame rate: sr / hop_size = 24000 / 300 = 80 frames/sec
+# mel downsampling: ×2 (pitch extractor doubles frame rate internally)
+# So: 1 mel frame = 300 waveform samples
+# And: 1 "double-rate" frame = 300 samples → wave index = frame_idx * 2 * 300</span>
+
+<span class="hl-yellow">start</span> = (random_start * 2) * 300
+<span class="hl-yellow">end</span>   = ((random_start + mel_len) * 2) * 300</pre>
+          </div>
+        <p>
+          The <strong>300</strong> is the hop size (in samples) of the mel spectrogram. The extra
+          <strong>×2</strong> comes from the fact that <span class="ic">mel_input_length</span> is
+          measured in the <em>original</em> mel frame space, while the crop indices used for the
+          waveform operate in the downsampled space (half the frames). This mapping must be exact —
+          any off-by-one causes the decoder to hear a different audio segment than it generates a
+          spectrogram for, corrupting the reconstruction loss.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-warn">BUG</span>
+        <span class="analysis-title">bounds check added but not consistently — waveform crop can exceed array</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          The training loop adds <span class="ic">if end > len(waves[bib]): continue</span> — this is
+          a defensive fix that was clearly added after observing index errors. The fix is correct but
+          reveals a structural issue: the mel-to-wave coordinate mapping occasionally produces an
+          end index beyond the array. This happens when the waveform was resampled or padded to a
+          slightly different length than expected from the mel length.
+        </p>
+        <p>
+          <strong>Better fix:</strong> Clamp <span class="ic">end = min(end, len(waves[bib]))</span>
+          rather than skipping, so you don't discard an otherwise valid sample. Only skip if the
+          resulting crop is shorter than a minimum duration.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">np.asarray(y).float() — why not just torch.from_numpy(y)</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">waves[bib]</span> may come from the dataloader as a Python list of floats
+          (not a numpy array) depending on the dataset implementation. <span class="ic">torch.from_numpy()</span>
+          requires a numpy array and will raise <span class="ic">TypeError</span> on a list.
+          <span class="ic">np.asarray(y)</span> handles both lists and arrays uniformly before the
+          numpy → torch conversion. The <span class="ic">.float()</span> cast ensures fp32 even if
+          the original was fp64 (doubles), which would mismatch the model's weights.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 10 ══ -->
+  <div class="section" id="s10">
+    <div class="section-header">
+      <div class="section-num">10</div>
+      <h2><span class="sub">Multi-component Objective</span>Loss Landscape</h2>
+    </div>
+
+    <table class="comparison-table">
+      <tr>
+        <th>Loss Term</th>
+        <th>Lambda Key</th>
+        <th>Active From</th>
+        <th>What It Trains</th>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_mel</span> (MultiResSTFT)</td>
+        <td class="t-info">lambda_mel</td>
+        <td>Epoch 0</td>
+        <td>Waveform reconstruction quality — the primary acoustic fidelity loss.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_F0_rec</span></td>
+        <td class="t-info">lambda_F0</td>
+        <td>Epoch 0</td>
+        <td>Pitch accuracy. Smooth L1 scaled ÷10 to prevent pitch dominating early training.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_norm_rec</span></td>
+        <td class="t-info">lambda_norm</td>
+        <td>Epoch 0</td>
+        <td>Energy/loudness contour matching via log-normalised spectrogram.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_ce</span> + <span class="ic">loss_dur</span></td>
+        <td class="t-info">lambda_ce / lambda_dur</td>
+        <td>Epoch 0</td>
+        <td>Phoneme duration prediction — aligns text to mel frames.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_gen_all</span> (GAN)</td>
+        <td class="t-info">lambda_gen</td>
+        <td>Epoch 0</td>
+        <td>Generator fool loss against MPD+MSD — perceptual quality.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_lm</span> (WavLM)</td>
+        <td class="t-info">lambda_slm</td>
+        <td>Epoch 0</td>
+        <td>Linguistic naturalness via WavLM feature matching.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_sty</span></td>
+        <td class="t-warn">lambda_sty</td>
+        <td>diff_epoch</td>
+        <td>Style prediction: L1 between diffusion-sampled style and ground truth.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_diff</span></td>
+        <td class="t-warn">lambda_diff</td>
+        <td>diff_epoch</td>
+        <td>Denoising score matching — trains the diffusion head.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_mono</span></td>
+        <td class="t-info">lambda_mono</td>
+        <td>Epoch 0</td>
+        <td>L1 penalty between soft and monotonic attention × 10 — encourages alignment quality.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">loss_s2s</span></td>
+        <td class="t-info">lambda_s2s</td>
+        <td>Epoch 0</td>
+        <td>Cross-entropy on phoneme classification — trains text aligner's discriminative head.</td>
+      </tr>
+      <tr>
+        <td><span class="ic">d_loss_slm</span> / <span class="ic">loss_gen_lm</span></td>
+        <td class="t-bad">separate pass</td>
+        <td>joint_epoch</td>
+        <td>SLM adversarial: discriminator and generator losses for WavLM-based adversarial alignment.</td>
+      </tr>
+    </table>
+
+    <div class="analysis-block" style="margin-top:20px;">
+      <div class="analysis-header">
+        <span class="badge badge-warn">IMPORTANT</span>
+        <span class="analysis-title">Discriminator update happens BEFORE generator — correct ordering</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          The GAN update order is: (1) discriminator backward + step on detached
+          <span class="ic">y_rec.detach()</span>, then (2) generator backward including adversarial
+          loss. This is the standard GAN training protocol — discriminator must not see gradients
+          from the generator loss. The <span class="ic">.detach()</span> call on
+          <span class="ic">y_rec</span> during discriminator update is the key guard that prevents
+          the generator from being updated twice.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 11 ══ -->
+  <div class="section" id="s11">
+    <div class="section-header">
+      <div class="section-num">11</div>
+      <h2><span class="sub">Stability & Robustness</span>Gradient Flow & NaN Guards</h2>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">GOOD</span>
+        <span class="analysis-title">NaN/Inf detection on y_rec and key tensors</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          Two guard points exist:
+        </p>
+        <ul class="review-list">
+          <li><strong>Early guard (post-decoder):</strong> <span class="ic">if torch.isnan(y_rec).any() or torch.isinf(y_rec).any(): continue</span> — skips the entire batch before any loss computation.</li>
+          <li><strong>Late guard (pre-g_loss backprop):</strong> Checks a dict of key tensors including <span class="ic">asr, p_en, F0_fake, N_fake, y_rec, loss_mel</span>. Sets a <span class="ic">bad</span> flag and continues.</li>
+        </ul>
+        <p>
+          Having both guards is redundant for <span class="ic">y_rec</span> but provides defence-in-depth.
+          The late guard is more valuable because it catches NaN in intermediate tensors that wouldn't
+          show up in <span class="ic">y_rec</span> alone.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-bad">CONCERN</span>
+        <span class="analysis-title">IPython debugger import inside hot path</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          <span class="ic">from IPython.core.debugger import set_trace; set_trace()</span> is called
+          if <span class="ic">g_loss</span> is NaN. On a headless server (no TTY) this will either:
+          (a) hang the process waiting for keyboard input, or (b) raise an exception.
+          In either case, a multi-hour training run would silently freeze or crash.
+        </p>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label current">dangerous — freezes headless server</div>
+      <pre><span class="hl-red">if torch.isnan(g_loss):
+    from IPython.core.debugger import set_trace
+    set_trace()  # WILL HANG on headless server!</span></pre>
+    </div>
+    <div class="code-wrap">
+      <div class="code-label improved">production-safe — log and skip</div>
+      <pre><span class="hl-blue">if</span> torch.isnan(g_loss):
+    logger.error(
+        <span class="hl-yellow">f"[NaN g_loss] epoch={epoch} step={i} — skipping batch. "</span>
+        <span class="hl-yellow">f"loss_mel={to_scalar(loss_mel):.5f} "</span>
+        <span class="hl-yellow">f"loss_diff={to_scalar(loss_diff):.5f}"</span>
+    )
+    <span class="hl-green">optimizer.zero_grad()   # clear any partial gradients</span>
+    <span class="hl-blue">continue</span></pre>
+    </div>
+
+    <div class="analysis-block" style="margin-top:16px;">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">SLM gradient normalisation with predictor threshold</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          The SLM adversarial loss can produce very large gradients, particularly in early joint-epoch
+          training. The code computes the L2 norm of each module's gradients and, if the predictor
+          norm exceeds <span class="ic">slmadv_params.thresh</span>, rescales all modules' gradients
+          by <span class="ic">1 / total_norm['predictor']</span>. This is a global gradient normalisation
+          keyed on the most sensitive module — a sensible heuristic.
+        </p>
+        <p>
+          Additionally, <span class="ic">duration_proj</span>, <span class="ic">lstm</span>, and
+          <span class="ic">diffusion</span> parameters are further scaled by
+          <span class="ic">slmadv_params.scale</span> — these modules are more fragile and need
+          gentler SLM updates.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 12 ══ -->
+  <div class="section" id="s12">
+    <div class="section-header">
+      <div class="section-num">12</div>
+      <h2><span class="sub">Persistence Strategy</span>Checkpoint & Best-Model Logic</h2>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-good">GOOD</span>
+        <span class="analysis-title">Dual checkpoint strategy: periodic + best</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          Two checkpoint files are maintained:
+        </p>
+        <ul class="review-list">
+          <li><strong>epoch_2nd_XXXXX.pth</strong> — one per <span class="ic">save_freq</span> epochs. Named by epoch number so you can roll back to any specific point. Keeps full training history on disk.</li>
+          <li><strong>best_model.pth</strong> — overwritten only when validation loss improves. Always points to the best known checkpoint without hunting through epoch numbers.</li>
+        </ul>
+        <p>
+          The state dict includes <span class="ic">net, optimizer, iters, val_loss, epoch</span> —
+          all the information needed to resume training exactly where it stopped.
+        </p>
+      </div>
+    </div>
+
+    <div class="analysis-block">
+      <div class="analysis-header">
+        <span class="badge badge-bad">BUG</span>
+        <span class="analysis-title">Best model existence check uses wrong path</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          Inside the <span class="ic">if is_best:</span> block, the debug existence check re-uses
+          <span class="ic">save_path</span> (the periodic checkpoint) instead of
+          <span class="ic">best_path</span>. This means the "Save OK" confirmation for the best
+          model always succeeds (because the periodic checkpoint was just written) even if the best
+          model save silently failed.
+        </p>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label current">bug — checking wrong path for best model</div>
+      <pre><span class="hl-blue">if</span> is_best:
+    best_path = osp.join(log_dir, <span class="hl-yellow">'best_model.pth'</span>)
+    torch.save(state, best_path)
+    <span class="hl-red">if os.path.exists(save_path):  # ← BUG: should be best_path</span>
+        logger.info(<span class="hl-yellow">f"[Save OK] → {save_path}"</span>)  <span class="hl-red"># misleading</span></pre>
+    </div>
+    <div class="code-wrap">
+      <div class="code-label improved">fixed</div>
+      <pre><span class="hl-blue">if</span> is_best:
+    best_path = osp.join(log_dir, <span class="hl-yellow">'best_model.pth'</span>)
+    torch.save(state, best_path)
+    <span class="hl-green">if os.path.exists(best_path):  # ← correct
+        logger.info(f"[Save OK] Best model → {best_path} (val_loss={best_loss:.5f})")
+    else:
+        logger.error(f"[Save FAIL] Best model NOT written → {best_path}")</span></pre>
+    </div>
+
+    <div class="analysis-block" style="margin-top:16px;">
+      <div class="analysis-header">
+        <span class="badge badge-good">CORRECT</span>
+        <span class="analysis-title">sigma_data estimation and config re-save</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          When <span class="ic">estimate_sigma_data=True</span>, the diffusion module's sigma parameter
+          is estimated empirically as the mean standard deviation of style vectors across the run
+          (<span class="ic">np.mean(running_std)</span>). This estimated value is then written back
+          into the YAML config so future runs use the empirically calibrated value instead of the
+          default. This is a self-calibrating mechanism — the training process improves its own config.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 13 ══ -->
+  <div class="section" id="s13">
+    <div class="section-header">
+      <div class="section-num">13</div>
+      <h2><span class="sub">Metric Evaluation</span>Validation Loop</h2>
+    </div>
+
+    <div class="card-grid">
+      <div class="card good">
+        <div class="card-label">Correct</div>
+        <h3>model.eval() for all modules</h3>
+        <p>Setting all model keys to eval mode disables dropout and switches BatchNorm to use running
+        statistics. Critically, this includes the text aligner and BERT — both use attention dropout
+        that would add noise to validation metrics.</p>
+      </div>
+      <div class="card good">
+        <div class="card-label">Correct</div>
+        <h3>torch.no_grad() wrapping</h3>
+        <p>The entire validation loop runs under <span class="ic">torch.no_grad()</span>, preventing
+        autograd from building computation graphs. On a large model like StyleTTS2, this can halve
+        validation memory usage.</p>
+      </div>
+      <div class="card warn">
+        <div class="card-label">Risk</div>
+        <h3>Bare except: continue</h3>
+        <p>Silent exception swallowing hides bugs. A batch that fails due to a genuine code error
+        (not a data issue) will be silently skipped and <span class="ic">iters_test</span> will be
+        lower, making the reported average slightly off. Use <span class="ic">except Exception as e:
+        logger.warning(...)</span> at minimum.</p>
+      </div>
+      <div class="card warn">
+        <div class="card-label">Bug</div>
+        <h3>mel_length used before assignment in val loop</h3>
+        <p><span class="ic">mel_length</span> is set inside the per-sample for loop but checked in
+        the same loop via <span class="ic">if mel_length &lt;= mel_len</span>. On the first iteration
+        it comes from the last training loop's value — a stale variable. Add explicit assignment:
+        <span class="ic">mel_length = int(mel_input_length[bib].item() / 2)</span>.</p>
+      </div>
+    </div>
+
+    <div class="analysis-block" style="margin-top:20px;">
+      <div class="analysis-header">
+        <span class="badge badge-warn">ASYMMETRY</span>
+        <span class="analysis-title">Validation loop uses different style encoder path than training</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          In training: <span class="ic">s = model.style_encoder(gt.unsqueeze(1))</span> is computed
+          <em>after</em> the predictor encoder. In validation: <span class="ic">s</span> is first
+          assigned from predictor_encoder, then overwritten by
+          <span class="ic">s = model.style_encoder(gt.unsqueeze(1))</span>. The overwrite makes the
+          first predictor_encoder assignment unused for the decoder call. This is probably intentional
+          (use style encoder for decoder in val) but the dead predictor_encoder call wastes compute
+          and creates confusion.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 14 ══ -->
+  <div class="section" id="s14">
+    <div class="section-header">
+      <div class="section-num">14</div>
+      <h2><span class="sub">Critical Issues</span>Bugs, Risks & Fixes Summary</h2>
+    </div>
+
+    <table class="comparison-table">
+      <tr>
+        <th>Severity</th>
+        <th>Location</th>
+        <th>Issue</th>
+        <th>Fix</th>
+      </tr>
+      <tr>
+        <td class="t-bad">🔴 CRITICAL</td>
+        <td><span class="ic">g_loss NaN block</span></td>
+        <td>IPython set_trace() hangs headless server</td>
+        <td>Replace with logger.error() + continue</td>
+      </tr>
+      <tr>
+        <td class="t-bad">🔴 HIGH</td>
+        <td><span class="ic">is_best block</span></td>
+        <td>Existence check uses save_path not best_path</td>
+        <td>Change os.path.exists(save_path) → best_path</td>
+      </tr>
+      <tr>
+        <td class="t-warn">🟡 MEDIUM</td>
+        <td><span class="ic">validation for loop</span></td>
+        <td>mel_length may be stale variable from training loop</td>
+        <td>Assign mel_length = int(mel_input_length[bib].item()/2) explicitly</td>
+      </tr>
+      <tr>
+        <td class="t-warn">🟡 MEDIUM</td>
+        <td><span class="ic">run_validation_inference</span></td>
+        <td>csv_file.close() not in finally block</td>
+        <td>Use context manager: with open(...) as csv_file:</td>
+      </tr>
+      <tr>
+        <td class="t-warn">🟡 MEDIUM</td>
+        <td><span class="ic">run_validation_inference</span></td>
+        <td>mel_len <= 0 not guarded before randint</td>
+        <td>Add early continue with warning if mel_len <= 0</td>
+      </tr>
+      <tr>
+        <td class="t-warn">🟡 MEDIUM</td>
+        <td><span class="ic">waveform crop</span></td>
+        <td>Skips sample when end > len(waves[bib]) — wastes data</td>
+        <td>Clamp: end = min(end, len(waves[bib]))</td>
+      </tr>
+      <tr>
+        <td class="t-info">🔵 LOW</td>
+        <td><span class="ic">main()</span></td>
+        <td>saving_epoch variable assigned but never used</td>
+        <td>Remove dead variable</td>
+      </tr>
+      <tr>
+        <td class="t-info">🔵 LOW</td>
+        <td><span class="ic">wandb cache paths</span></td>
+        <td>Hard-coded /workspace/rizoan paths</td>
+        <td>Derive from log_dir or WANDB_CACHE env var</td>
+      </tr>
+      <tr>
+        <td class="t-info">🔵 LOW</td>
+        <td><span class="ic">bare except: continue</span></td>
+        <td>Silent error swallowing in both loops</td>
+        <td>except Exception as e: logger.warning(f"...: {e}")</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ══ SECTION 15 ══ -->
+  <div class="section" id="s15">
+    <div class="section-header">
+      <div class="section-num">15</div>
+      <h2><span class="sub">Going Further</span>Innovation Ideas</h2>
+    </div>
+
+    <div class="innovations">
+      <h3>💡 Idea 1: Curriculum Crop Length Scheduling</h3>
+      <p>
+        Currently <span class="ic">mel_len</span> is capped by <span class="ic">max_len // 2</span> and the
+        minimum of the batch. A curriculum schedule could start with short crops (fast batches, large gradients)
+        and linearly grow toward full utterance length as training stabilises. This is analogous to curriculum
+        learning in NLP and has shown improved convergence in speech synthesis.
+      </p>
+
+      <h3>💡 Idea 2: Exponential Moving Average (EMA) Checkpoint</h3>
+      <p>
+        Maintain a running EMA of all model weights during training. EMA weights often produce better
+        inference quality than the raw checkpoint, especially for GAN-trained generators. Save the EMA
+        state alongside the regular checkpoint. TTS models in particular benefit because EMA smooths
+        out the GAN oscillations in the generator weights.
+      </p>
+
+      <h3>💡 Idea 3: Per-Speaker Validation Inference Breakdown in W&B</h3>
+      <p>
+        If speaker IDs are available in the dataset, group validation inference results by speaker and
+        log per-speaker mel loss in the W&B table. This surfaces cases where the model is overfitting
+        to training speakers while underfitting held-out voices — crucial for multi-speaker fine-tuning.
+      </p>
+
+      <h3>💡 Idea 4: Gradient Norm Logging for All Modules</h3>
+      <p>
+        The SLM section already computes per-module gradient norms. Expose these to W&B/TensorBoard every
+        <span class="ic">log_interval</span> steps. Watching gradient norms is the single most diagnostic
+        signal in multi-loss TTS training — exploding norms in the diffusion head or BERT encoder immediately
+        signal a problem without waiting for validation.
+      </p>
+
+      <h3>💡 Idea 5: Automatic Checkpoint Pruning</h3>
+      <p>
+        Keep only the N most recent periodic checkpoints and always keep the best. As written, every epoch
+        produces a new .pth file that can consume tens of GB over a long run. A simple
+        <span class="ic">glob + sort + unlink</span> loop after saving would auto-prune to the last 5 epochs.
+      </p>
+
+      <h3>💡 Idea 6: Validation MOS Proxy via DNSMOS or UTMOSv2</h3>
+      <p>
+        Instead of (or in addition to) mel loss as a validation metric, run a pre-trained mean opinion
+        score (MOS) predictor on the generated clips. Models like DNSMOS or UTMOSv2 are fast (~10ms/clip)
+        and correlate strongly with human perceptual quality. Log as <span class="ic">eval/mos_proxy</span>
+        in W&B — this is a much more meaningful convergence signal than reconstruction loss alone.
+      </p>
+    </div>
+  </div>
+
+  <!-- ══ SECTION 16 ══ -->
+  <div class="section" id="s16">
+    <div class="section-header">
+      <div class="section-num">16</div>
+      <h2><span class="sub">Final Assessment</span>Summary Scorecard</h2>
+    </div>
+
+    <div class="scoreboard">
+      <div class="score-cell">
+        <div class="score-val green">A</div>
+        <div class="score-label">Overall Architecture</div>
+      </div>
+      <div class="score-cell">
+        <div class="score-val green">A</div>
+        <div class="score-label">W&B Integration</div>
+      </div>
+      <div class="score-cell">
+        <div class="score-val yellow">B</div>
+        <div class="score-label">Error Handling</div>
+      </div>
+      <div class="score-cell">
+        <div class="score-val yellow">B+</div>
+        <div class="score-label">Reproducibility</div>
+      </div>
+      <div class="score-cell">
+        <div class="score-val green">A-</div>
+        <div class="score-label">Loss Design</div>
+      </div>
+      <div class="score-cell">
+        <div class="score-val red">C+</div>
+        <div class="score-label">Portability</div>
+      </div>
+      <div class="score-cell">
+        <div class="score-val yellow">B</div>
+        <div class="score-label">Code Clarity</div>
+      </div>
+      <div class="score-cell">
+        <div class="score-val green">A</div>
+        <div class="score-label">NaN Robustness</div>
+      </div>
+    </div>
+
+    <div class="analysis-block" style="margin-top:28px;">
+      <div class="analysis-header">
+        <span class="badge badge-info">VERDICT</span>
+        <span class="analysis-title">Overall Assessment</span>
+      </div>
+      <div class="analysis-body">
+        <p>
+          This is a well-structured, production-intentioned fine-tuning script with solid W&B
+          integration, correct staged training logic, and good NaN defensive coding. The architecture
+          choices (EMA exclusion, DataParallel design, multi-loss curriculum) reflect deep familiarity
+          with the StyleTTS2 codebase.
+        </p>
+        <p>
+          The critical issues (IPython debugger in headless path, best-model path check bug) are
+          easy one-line fixes but would cause silent failures or hangs in production. The portability
+          issue (hard-coded server paths) should be addressed before sharing with collaborators.
+        </p>
+        <p>
+          <strong>Priority fix order:</strong> (1) Replace set_trace with logger.error+continue,
+          (2) Fix best_path check, (3) Wrap CSV with context manager, (4) Fix stale mel_length in
+          val loop, (5) Remove saving_epoch dead variable, (6) Make wandb cache path configurable.
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <div>StyleTTS2 Fine-Tune — Deep Code Review</div>
+  <div>train_finetune_regular_wandb.py</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,20 @@
+/workspace/conda/envs/tts/lib/python3.10/site-packages/phonemizer/utils.py:22: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/workspace/conda/envs/tts/lib/python3.10/site-packages/transformers/utils/generic.py:441: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/workspace/conda/envs/tts/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/workspace/conda/envs/tts/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+2026-05-11 15:39:27,848 [INFO] styletts2.server — Running inference on: CUDA
+2026-05-11 15:39:27,970 [INFO] styletts2.server — Loading phonemizers…
+2026-05-11 15:39:28,030 [INFO] styletts2.server — Loading YAML config…
+2026-05-11 15:39:28,040 [INFO] styletts2.server — Loading ASR aligner…
+Traceback (most recent call last):
+  File "/workspace/rizoan/StyleTTS2-Fork/styletts2-api/backend/main.py", line 177, in <module>
+    text_aligner = load_ASR_models(config["ASR_path"], config["ASR_config"])
+  File "/workspace/rizoan/StyleTTS2-Fork/models.py", line 608, in load_ASR_models
+    asr_model_config = _load_config(ASR_MODEL_CONFIG)
+  File "/workspace/rizoan/StyleTTS2-Fork/models.py", line 597, in _load_config
+    with open(path) as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'Utils/ASR/config.yml'

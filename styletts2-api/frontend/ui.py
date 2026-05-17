@@ -19,7 +19,7 @@ import requests
 import streamlit as st
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DEFAULT_API_URL = os.getenv("STYLETTS2_API_URL", "http://localhost:8001")
+DEFAULT_API_URL = os.getenv("STYLETTS2_API_URL", "http://localhost:8000")
 
 st.set_page_config(
     page_title="StyleTTS2 — Speech Synthesis",
@@ -228,6 +228,11 @@ if synthesize_btn:
         audio_bytes = response.content
         headers = response.headers
 
+        mos = headers.get("X-MOS", "?")
+        silence_ratio = headers.get("X-Silence-Ratio", "?")
+        noise_ratio = headers.get("X-Noise-Ratio", "?")
+        #clipping_ratio = headers.get("X-Clipping-Ratio", "?")
+        speaking_rate = headers.get("X-Speaking-Rate", "?")
         used_default = headers.get("X-Used-Default-Reference", "false") == "true"
         st.success(
             "✅ Synthesis complete!"
@@ -263,3 +268,15 @@ if synthesize_btn:
             st.subheader("📖 Reference audio (uploaded)")
             reference_audio.seek(0)
             st.audio(reference_audio.read(), format="audio/wav")
+
+        st.subheader("📊 Quality Analysis")
+
+        q1, q2, q3 = st.columns(3)
+
+        q1.metric("UTMOS", mos)
+        q1.metric("Noise Ratio", noise_ratio)
+
+        q2.metric("Silence Ratio", silence_ratio)
+        #q2.metric("Clipping Ratio", clipping_ratio)
+
+        q3.metric("Speaking Rate", f"{speaking_rate} w/s")

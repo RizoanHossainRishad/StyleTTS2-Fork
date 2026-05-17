@@ -24,11 +24,15 @@ import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from evaluator import evaluate_audio
 
 # ── Default reference audio (used when caller does not upload one) ────────────
 DEFAULT_REF_AUDIO = (
-    "/workspace/rizoan/StyleTTS2-Fork/styletts2-api/backend/sample_refs/"
-    "Record (online-voice-recorder.com).wav"
+    #"/workspace/rizoan/StyleTTS2-Fork/styletts2-api/backend/sample_refs/"
+    "/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/styletts2-api/backend/sample_refs/"
+    #"Record (online-voice-recorder.com).wav"
+    #"teacher_000_20260104_080449.wav"
+    "train_bengalimale_03195.wav"
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -42,6 +46,7 @@ logger = logging.getLogger(__name__)
 # ── Engine (model loading happens at import time) ─────────────────────────────
 logger.info("Importing StyleTTS2 engine …")
 from engine import compute_style, inference, LFinference, STinference  # noqa: E402
+#from engine2 import compute_style, inference, LFinference, STinference  # noqa: E402
 
 logger.info("Engine ready.")
 
@@ -97,6 +102,7 @@ def _wav_response(
     used_default,
     inference_time=None,
     rtf=None,
+    metrics=None
 ):
     headers = {
         "X-Request-Id": request_id,
@@ -111,6 +117,20 @@ def _wav_response(
 
     if rtf is not None:
         headers["X-RTF"] = f"{rtf:.4f}"
+
+    if metrics is not None:
+
+        mos = metrics.get("mos")
+        silence_ratio = metrics.get("silence_ratio")
+        noise_ratio = metrics.get("noise_ratio")
+        clipping_ratio = metrics.get("clipping_ratio")
+        speaking_rate = metrics.get("speaking_rate")
+
+        headers["X-MOS"] = f"{mos:.3f}" if mos is not None else ""
+        headers["X-Silence-Ratio"] = f"{silence_ratio:.4f}" if silence_ratio is not None else ""
+        headers["X-Noise-Ratio"] = f"{noise_ratio:.4f}" if noise_ratio is not None else ""
+        headers["X-Clipping-Ratio"] = f"{clipping_ratio:.4f}" if clipping_ratio is not None else ""
+        headers["X-Speaking-Rate"] = f"{speaking_rate:.4f}" if speaking_rate is not None else ""
 
     return Response(
         content=_wav_bytes(audio),
@@ -233,6 +253,7 @@ async def synthesize(
             diffusion_steps=diffusion_steps,
             embedding_scale=embedding_scale,
         )
+        metrics = evaluate_audio(audio, text)
         inference_time = time.time() - t0
         rtf = (time.time() - t0) / (len(audio) / SAMPLE_RATE)
         logger.info("[%s] done  RTF=%.4f  dur=%.2fs", request_id, rtf, len(audio) / SAMPLE_RATE)
@@ -250,6 +271,7 @@ async def synthesize(
     used_default,
     inference_time=inference_time,
     rtf=rtf,
+    metrics=metrics
     )
 
 
@@ -327,6 +349,8 @@ async def synthesize_longform(
         audio = np.concatenate(
             [chunk for wav in wavs for chunk in (wav, silence)], axis=0
         )
+        metrics = evaluate_audio(audio, text)
+        inference_time = time.time() - t0
         rtf = (time.time() - t0) / (len(audio) / SAMPLE_RATE)
         logger.info("[%s] done  %d sentences  RTF=%.4f", request_id, len(sentences), rtf)
     except HTTPException:
@@ -337,7 +361,14 @@ async def synthesize_longform(
     finally:
         _cleanup(ref_path, is_tmp)
 
-    return _wav_response(audio, request_id, used_default)
+    return _wav_response(
+    audio,
+    request_id,
+    used_default,
+    inference_time=inference_time,
+    rtf=rtf,
+    metrics=metrics
+    )
 
 
 # ── /synthesize/style ─────────────────────────────────────────────────────────
@@ -397,6 +428,8 @@ async def synthesize_style(
             diffusion_steps=diffusion_steps,
             embedding_scale=embedding_scale,
         )
+        metrics = evaluate_audio(audio, text)
+        inference_time = time.time() - t0
         rtf = (time.time() - t0) / (len(audio) / SAMPLE_RATE)
         logger.info("[%s] done  RTF=%.4f", request_id, rtf)
     except HTTPException:
@@ -407,7 +440,14 @@ async def synthesize_style(
     finally:
         _cleanup(ref_path, is_tmp)
 
-    return _wav_response(audio, request_id, used_default)
+    return _wav_response(
+    audio,
+    request_id,
+    used_default,
+    inference_time=inference_time,
+    rtf=rtf,
+    metrics=metrics
+    )
 
 
 # ── Entry-point ───────────────────────────────────────────────────────────────

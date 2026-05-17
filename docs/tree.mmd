@@ -1,0 +1,58 @@
+%% Mermaid file tree for StyleTTS2-Fork
+flowchart TB
+  A[StyleTTS2-Fork]
+  A --> ARCH[ARCHITECTURE.md]
+  A --> README[README.md]
+  A --> REQ[requirements.txt]
+  A --> CONFIGS[Configs/]
+  CONFIGS --> C1[config.yml]
+  CONFIGS --> C2[config_libritts.yml]
+  CONFIGS --> C3[config_ft.yml]
+
+  A --> DATA[Data/]
+  DATA --> D1[train_list.txt]
+  DATA --> D2[val_list.txt]
+  DATA --> D3[OOD_texts.txt]
+
+  A --> MODELS[Models/]
+  MODELS --> ML[LJSpeech/]
+  MODELS --> MB[LibriTTS/]
+  ML --> MLc[config_ft.yml]
+  ML --> MLb[best_modelthirdstage.pth]
+  ML --> MLO[Output/]
+  MB --> MBc[config.yml]
+  MB --> MBp[epochs_2nd_00020.pth]
+
+  A --> MODULES[Modules/]
+  MODULES --> MH[hifigan.py]
+  MODULES --> MD[discriminators.py]
+  MODULES --> MI[istftnet.py]
+  MODULES --> MS[slmadv.py]
+  MODULES --> MDiff[diffusion/]
+  MDiff --> MDd[diffusion.py]
+  MDiff --> MDm[modules.py]
+  MDiff --> MDs[sampler.py]
+
+  A --> API[styletts2-api/]
+  API --> APIb[backend/]
+  API --> APIf[frontend/]
+  APIb --> Mmain[main.py]
+  APIb --> Mengine[engine.py]
+  APIf --> Mui[ui.py]
+
+  A --> UTILS[Utils/]
+  UTILS --> UASR[ASR/]
+  UASR --> UAL[layers.py]
+  UASR --> UAM[models.py]
+  UTILS --> UPL[PLBERT/]
+  UPL --> UPLu[util.py]
+  UTILS --> UJDC[JDC/]
+  UJDC --> UJm[model.py]
+
+  A --> SCRIPTS[training scripts]
+  SCRIPTS --> T1[train_first.py]
+  SCRIPTS --> T2[train_second.py]
+  SCRIPTS --> TF[train_finetune.py & variants]
+
+  classDef dir fill:#f9f,stroke:#333,stroke-width:1px
+  class CONFIGS,DATA,MODELS,MODULES,API,UTILS,SCRIPTS dir

@@ -12,15 +12,24 @@ dicts = {}
 for i in range(len((symbols))):
     dicts[symbols[i]] = i
 
+
+
 class TextCleaner:
     def __init__(self, dummy=None):
         self.word_index_dictionary = dicts
-        print(len(dicts))
+
     def __call__(self, text):
         indexes = []
         for char in text:
+
+            # ---- minimal normalization fix ----
+            if char == '̃':
+                continue  # drop nasalization marker safely
+            # -----------------------------------
+
             try:
                 indexes.append(self.word_index_dictionary[char])
             except KeyError:
-                print(text)
+                print(f"[UNK CHAR] {repr(char)} in: {text}")
+
         return indexes

@@ -11,9 +11,10 @@ functions that main.py calls:
 import os
 import sys
 
+
 # ── Environment variables (must be set before heavy imports) ─────────────────
-os.environ["HOME"] = "/workspace/rizoan"
-os.environ["NLTK_DATA"] = "/workspace/rizoan/nltk_data"
+os.environ["HOME"] = "/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork"
+os.environ["NLTK_DATA"] = "/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/nltk_data"
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
@@ -36,7 +37,10 @@ from munch import Munch
 from torch import nn
 import torch.nn.functional as F
 from nltk.tokenize import word_tokenize
+import matplotlib
+matplotlib.use("Agg")
 
+import matplotlib.pyplot as plt
 logger = logging.getLogger(__name__)
 
 # ── Reproducibility seeds ────────────────────────────────────────────────────
@@ -50,14 +54,14 @@ np.random.seed(0)
 torch.set_num_threads(4)
 
 # ── Change working directory to repo root (models expect relative paths) ─────
-REPO_ROOT = "/workspace/rizoan/StyleTTS2-Fork"
+REPO_ROOT = "/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork"
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
 # ── NLTK data ────────────────────────────────────────────────────────────────
-os.makedirs("/workspace/rizoan/nltk_data", exist_ok=True)
-nltk.download("punkt", download_dir="/workspace/rizoan/nltk_data", quiet=True)
-nltk.download("punkt_tab", download_dir="/workspace/rizoan/nltk_data", quiet=True)
+os.makedirs("/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/nltk_data", exist_ok=True)
+nltk.download("punkt", download_dir="/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/nltk_data", quiet=True)
+nltk.download("punkt_tab", download_dir="/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/nltk_data", quiet=True)
 
 # ── Repo-local imports (available after chdir + sys.path) ────────────────────
 from models import *          # noqa: F401, F403
@@ -96,6 +100,33 @@ def preprocess(wave: np.ndarray) -> torch.Tensor:
     mel_tensor = (torch.log(1e-5 + mel_tensor.unsqueeze(0)) - _LOG_MEAN) / _LOG_STD
     return mel_tensor
 
+def save_alignment_plot(alignment, text, language="unknown"):
+    os.makedirs("alignment_plots", exist_ok=True)
+
+    plt.figure(figsize=(12, 4))
+
+    plt.imshow(
+        alignment,
+        aspect='auto',
+        origin='lower',
+        interpolation='nearest'
+    )
+
+    plt.xlabel("Audio Frames")
+    plt.ylabel("Tokens")
+    plt.title(f"Alignment Plot ({language})")
+
+    plt.colorbar()
+
+    safe_text = text[:40].replace(" ", "_").replace("/", "_")
+
+    filename = f"alignment_plots/{language}_{safe_text}.png"
+
+    plt.savefig(filename, bbox_inches='tight')
+
+    plt.close()
+
+    logger.info("Alignment plot saved: %s", filename)
 
 # ── Phonemisers ───────────────────────────────────────────────────────────────
 global_phonemizer_en = phonemizer.backend.EspeakBackend(
@@ -124,7 +155,7 @@ def _phonemize(text: str) -> str:
 
 def _load_models():
     config_path = "Models/LJSpeech/config_ft.yml"
-    checkpoint_path = "Models/LJSpeech/best_modelthirdstage.pth"
+    checkpoint_path = "Models/LJSpeech/best_modelprethird.pth"
 
     config = yaml.safe_load(open(config_path))
 
@@ -255,11 +286,25 @@ def inference(
         duration = torch.sigmoid(duration).sum(axis=-1)
         pred_dur = torch.round(duration.squeeze()).clamp(min=1)
 
-        pred_aln_trg = torch.zeros(input_lengths, int(pred_dur.sum().data))
+        num_tokens = tokens.shape[-1]
+        total_frames = int(pred_dur.sum().item())
+
+        pred_aln_trg = torch.zeros(num_tokens, total_frames)
+
         c_frame = 0
-        for i in range(pred_aln_trg.size(0)):
-            pred_aln_trg[i, c_frame : c_frame + int(pred_dur[i].data)] = 1
-            c_frame += int(pred_dur[i].data)
+
+        for i in range(num_tokens):
+            dur = int(pred_dur[i].item())
+
+            pred_aln_trg[i, c_frame:c_frame + dur] = 1
+
+            c_frame += dur
+
+        alignment = pred_aln_trg.cpu().numpy()
+
+        language = "bn" if is_bengali_text(text) else "en"
+
+        save_alignment_plot(alignment, text, language)
 
         en = d.transpose(-1, -2) @ pred_aln_trg.unsqueeze(0).to(device)
         if model_params.decoder.type == "hifigan":
@@ -344,11 +389,25 @@ def LFinference(
         duration = torch.sigmoid(duration).sum(axis=-1)
         pred_dur = torch.round(duration.squeeze()).clamp(min=1)
 
-        pred_aln_trg = torch.zeros(input_lengths, int(pred_dur.sum().data))
+        num_tokens = tokens.shape[-1]
+        total_frames = int(pred_dur.sum().item())
+
+        pred_aln_trg = torch.zeros(num_tokens, total_frames)
+
         c_frame = 0
-        for i in range(pred_aln_trg.size(0)):
-            pred_aln_trg[i, c_frame : c_frame + int(pred_dur[i].data)] = 1
-            c_frame += int(pred_dur[i].data)
+
+        for i in range(num_tokens):
+            dur = int(pred_dur[i].item())
+
+            pred_aln_trg[i, c_frame:c_frame + dur] = 1
+
+            c_frame += dur
+
+        alignment = pred_aln_trg.cpu().numpy()
+
+        language = "bn" if is_bengali_text(text) else "en"
+
+        save_alignment_plot(alignment, text, language)
 
         en = d.transpose(-1, -2) @ pred_aln_trg.unsqueeze(0).to(device)
         if model_params.decoder.type == "hifigan":
@@ -436,11 +495,25 @@ def STinference(
         duration = torch.sigmoid(duration).sum(axis=-1)
         pred_dur = torch.round(duration.squeeze()).clamp(min=1)
 
-        pred_aln_trg = torch.zeros(input_lengths, int(pred_dur.sum().data))
+        num_tokens = tokens.shape[-1]
+        total_frames = int(pred_dur.sum().item())
+
+        pred_aln_trg = torch.zeros(num_tokens, total_frames)
+
         c_frame = 0
-        for i in range(pred_aln_trg.size(0)):
-            pred_aln_trg[i, c_frame : c_frame + int(pred_dur[i].data)] = 1
-            c_frame += int(pred_dur[i].data)
+
+        for i in range(num_tokens):
+            dur = int(pred_dur[i].item())
+
+            pred_aln_trg[i, c_frame:c_frame + dur] = 1
+
+            c_frame += dur
+
+        alignment = pred_aln_trg.cpu().numpy()
+
+        language = "bn" if is_bengali_text(text) else "en"
+
+        save_alignment_plot(alignment, text, language)
 
         en = d.transpose(-1, -2) @ pred_aln_trg.unsqueeze(0).to(device)
         if model_params.decoder.type == "hifigan":

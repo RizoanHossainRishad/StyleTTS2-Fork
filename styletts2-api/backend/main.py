@@ -28,11 +28,13 @@ from evaluator import evaluate_audio
 
 # ── Default reference audio (used when caller does not upload one) ────────────
 DEFAULT_REF_AUDIO = (
-    #"/workspace/rizoan/StyleTTS2-Fork/styletts2-api/backend/sample_refs/"
-    "/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/styletts2-api/backend/sample_refs/"
+    "/mnt/newworkspace/rizoan/StyleTTS2-Fork/styletts2-api/backend/sample_refs/"
+    
     #"Record (online-voice-recorder.com).wav"
     #"teacher_000_20260104_080449.wav"
-    "train_bengalimale_03195.wav"
+    #"train_bengalimale_03195.wav"
+    #"LJ002-0021.wav"
+    "ban_01701_01464557268.wav"
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -45,8 +47,8 @@ logger = logging.getLogger(__name__)
 
 # ── Engine (model loading happens at import time) ─────────────────────────────
 logger.info("Importing StyleTTS2 engine …")
-from engine import compute_style, inference, LFinference, STinference  # noqa: E402
-#from engine2 import compute_style, inference, LFinference, STinference  # noqa: E402
+#from engine import compute_style, inference, LFinference, STinference  # noqa: E402
+from engine2 import compute_style, inference, LFinference, STinference  # noqa: E402
 
 logger.info("Engine ready.")
 

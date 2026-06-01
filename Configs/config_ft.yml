@@ -1,11 +1,11 @@
 log_dir: "Models/LJSpeech"
-save_freq: 5
+save_freq: 1
 log_interval: 10
 device: "cuda"
-epochs: 50 # number of finetuning epoch (1 hour of data)
-batch_size: 8
-max_len: 400 # maximum number of frames
-pretrained_model: "Models/LibriTTS/epochs_2nd_00020.pth"
+epochs: 7 # number of finetuning epoch (1 hour of data)
+batch_size: 4
+max_len: 100 # maximum number of frames
+pretrained_model: "Models/LJSpeech/epoch_00003.pth"
 second_stage_load_pretrained: true # set to true if the pre-trained model is for 2nd stage
 load_only_params: true # set to true if do not want to load epoch numbers and optimizer parameters
 
@@ -15,18 +15,18 @@ ASR_path: "Utils/ASR/epoch_00080.pth"
 PLBERT_dir: 'Utils/PLBERT/'
 
 data_params:
-  train_data: "Data/train_list.txt"
-  val_data: "Data/val_list.txt"
-  root_path: "/local/LJSpeech-1.1/wavs"
+  train_data: "/mnt/newworkspace/rizoan/Subset_unification/train_list.txt"
+  val_data: "/mnt/newworkspace/rizoan/Subset_unification/val_list.txt"
+  root_path: ""
   OOD_data: "Data/OOD_texts.txt"
   min_length: 50 # sample until texts with this size are obtained for OOD texts
 
 preprocess_params:
-  sr: 24000
+  sr: 22050
   spect_params:
     n_fft: 2048
-    win_length: 1200
-    hop_length: 300
+    win_length: 1024
+    hop_length: 256
 
 model_params:
   multispeaker: true
@@ -92,8 +92,8 @@ loss_params:
     lambda_sty: 1. # style reconstruction loss
     lambda_diff: 1. # score matching loss
     
-    diff_epoch: 10 # style diffusion starting epoch
-    joint_epoch: 30 # joint training starting epoch
+    diff_epoch: 1 # style diffusion starting epoch
+    joint_epoch: 2 # joint training starting epoch
 
 optimizer_params:
   lr: 0.0001 # general learning rate
@@ -101,8 +101,8 @@ optimizer_params:
   ft_lr: 0.0001 # learning rate for acoustic modules
   
 slmadv_params:
-  min_len: 400 # minimum length of samples
-  max_len: 500 # maximum length of samples
+  min_len: 50 # minimum length of samples
+  max_len: 200 # maximum length of samples
   batch_percentage: 0.5 # to prevent out of memory, only use half of the original batch size
   iter: 10 # update the discriminator every this iterations of generator update
   thresh: 5 # gradient norm above which the gradient is scaled

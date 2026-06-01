@@ -9,7 +9,7 @@ import pandas as pd
 # CONFIG
 # =========================================================
 
-API_URL = "http://localhost:8001/synthesize"
+API_URL = "http://localhost:8000/synthesize"
 
 INPUT_TEXT_FILE = "testset.txt"
 

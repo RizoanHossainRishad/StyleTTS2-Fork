@@ -13,8 +13,8 @@ import sys
 
 
 # ── Environment variables (must be set before heavy imports) ─────────────────
-os.environ["HOME"] = "/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork"
-os.environ["NLTK_DATA"] = "/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/nltk_data"
+os.environ["HOME"] = "/mnt/newworkspace/rizoan"
+os.environ["NLTK_DATA"] = "/mnt/newworkspace/rizoan/nltk_data"
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
@@ -54,14 +54,14 @@ np.random.seed(0)
 torch.set_num_threads(4)
 
 # ── Change working directory to repo root (models expect relative paths) ─────
-REPO_ROOT = "/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork"
+REPO_ROOT = "/mnt/newworkspace/rizoan/StyleTTS2-Fork"
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
 # ── NLTK data ────────────────────────────────────────────────────────────────
-os.makedirs("/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/nltk_data", exist_ok=True)
-nltk.download("punkt", download_dir="/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/nltk_data", quiet=True)
-nltk.download("punkt_tab", download_dir="/home/user01/Desktop/TTS/Backup/StyleTTS2-Fork/nltk_data", quiet=True)
+os.makedirs("/mnt/newworkspace/rizoan/nltk_data", exist_ok=True)
+nltk.download("punkt", download_dir="/mnt/newworkspace/rizoan/nltk_data", quiet=True)
+nltk.download("punkt_tab", download_dir="/mnt/newworkspace/rizoan/nltk_data", quiet=True)
 
 # ── Repo-local imports (available after chdir + sys.path) ────────────────────
 from models import *          # noqa: F401, F403
@@ -155,7 +155,7 @@ def _phonemize(text: str) -> str:
 
 def _load_models():
     config_path = "Models/LJSpeech/config_ft.yml"
-    checkpoint_path = "Models/LJSpeech/best_modelprethird.pth"
+    checkpoint_path = "Models/LJSpeech/second_best_model.pth"
 
     config = yaml.safe_load(open(config_path))
 

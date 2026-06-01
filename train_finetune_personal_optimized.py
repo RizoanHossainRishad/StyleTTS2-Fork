@@ -187,6 +187,10 @@ def run_validation_inference(
 
     total_mel_loss  = 0.0
     num_batches     = 0
+    #=======================================
+    total_alignment_score = 0.0
+    alignment_batches = 0
+    #=======================================
     wandb_audio_rows = []   # (gen_np, ref_np) pairs for W&B table upload
 
     is_first_infer_epoch = (epoch == infer_start_epoch)
@@ -226,6 +230,22 @@ def run_validation_inference(
                 bert_dur = model.bert(texts, attention_mask=(~text_mask).int())
                 d_en     = model.bert_encoder(bert_dur).transpose(-1, -2)
                 d, p     = model.predictor(d_en, s_pred, input_lengths, s2s_attn_mono, text_mask)
+
+                # ==========================================================
+                # Inference alignment score
+                # Measures duration prediction stability during inference
+                # Lower variance relative to mean = smoother alignment
+                # ==========================================================
+                pred_durations = torch.sigmoid(d).sum(dim=-1)
+
+                batch_alignment_score = (
+                    pred_durations.float().std() /
+                    (pred_durations.float().mean() + 1e-6)
+                ).item()
+
+                total_alignment_score += batch_alignment_score
+                alignment_batches += 1
+                #=============================================================
 
                 mel_len = int(mel_input_length.min().item() / 2 - 1)
                 en_list, p_en_list, gt_list, wav_list = [], [], [], []
@@ -327,6 +347,13 @@ def run_validation_inference(
     csv_file.close()
     avg_mel_loss = total_mel_loss / max(num_batches, 1)
 
+    #=============================================
+    avg_alignment_score = (
+        total_alignment_score / max(alignment_batches, 1)
+    )
+    #=============================================
+
+
     # Upload audio table to W&B (skipped if max_samples_to_log == 0)
     if wandb_run is not None and wandb_audio_rows:
         audio_table = wandb.Table(columns=["epoch", "sample", "generated", "reference"])
@@ -346,7 +373,7 @@ def run_validation_inference(
         f"[Inference] Epoch {epoch+1}: avg mel loss = {avg_mel_loss:.5f}, "
         f"saved to {epoch_out_dir}"
     )
-    return avg_mel_loss
+    return avg_mel_loss, avg_alignment_score
 
 
 @click.command()
@@ -366,11 +393,25 @@ def main(config_path):
     # =========================================================================
     wandb.login()
     wandb_run = wandb.init(
-        project=config.get("wandb_project", "styletts2-finetune"),
+        project=config.get("wandb_project", "StyleTTS2-Improved-Finetune"),
         name=config.get("wandb_run_name", f"run_{int(time.time())}"),
         config=config,      # logs all YAML keys as hyper-parameters
         resume="allow",
     )
+
+    # ==========================================================
+    # W&B metric definitions
+    # Keeps train/eval metrics separated cleanly
+    # ==========================================================
+    wandb.define_metric("train/*", step_metric="train/step")
+    wandb.define_metric("eval/*", step_metric="eval/epoch")
+
+    # ── Static model metadata ─────────────────────────────────────
+    wandb_run.config.update({
+        "model_parameters_million": 300,
+        "checkpoint_size_gb": 2.01,
+    })
+
     logger.info(f"W&B run: {wandb_run.name}  id: {wandb_run.id}")
 
     # =========================================================================
@@ -552,7 +593,11 @@ def main(config_path):
         
     n_down = model.text_aligner.n_down
 
-    best_loss = float('inf')
+    #======================================
+    best_score = float('inf')
+    second_best_score = float('inf')
+    #======================================
+
     loss_train_record = list([])
     loss_test_record = list([])
     iters = 0
@@ -582,6 +627,7 @@ def main(config_path):
     for epoch in range(start_epoch, epochs):
         running_loss = 0
         start_time = time.time()
+        epoch_step_start = time.time()
 
         _ = [model[key].eval() for key in model]
         
@@ -956,7 +1002,14 @@ def main(config_path):
                 # ── W&B training metrics ──────────────────────────────────────
                 # step=iters keeps x-axis aligned with global step count so
                 # training and validation curves share the same x-axis in W&B.
+                # ── Training throughput ─────────────────────────────────────
+                elapsed = time.time() - epoch_step_start
+                steps_per_sec = log_interval / max(elapsed, 1e-6)
+
+                epoch_step_start = time.time()
+
                 wandb.log({
+                    "train/step": iters,
                     "train/mel_loss":     running_loss / log_interval,
                     "train/gen_loss":     to_scalar(loss_gen_all),
                     "train/d_loss":       to_scalar(d_loss),
@@ -971,7 +1024,8 @@ def main(config_path):
                     "train/gen_loss_slm": to_scalar(loss_gen_lm),
                     "train/s2s_loss":     to_scalar(loss_s2s),
                     "train/mono_loss":    to_scalar(loss_mono),
-                }, step=iters, commit=True)
+                    "train/steps_per_sec": steps_per_sec,
+                }, commit=True)
                 
                 running_loss = 0
                 
@@ -980,6 +1034,8 @@ def main(config_path):
         loss_test = 0
         loss_align = 0
         loss_f = 0
+        alignment_score_total = 0
+
         _ = [model[key].eval() for key in model]
         logger.info("[DEBUG] Validation loop starting...")
         with torch.no_grad():
@@ -1008,6 +1064,7 @@ def main(config_path):
 
                         d_gt = s2s_attn_mono.sum(axis=-1).detach()
 
+
                     ss = []
                     gs = []
 
@@ -1029,6 +1086,16 @@ def main(config_path):
                                                         input_lengths, 
                                                         s2s_attn_mono, 
                                                         text_mask)
+
+                    pred_durations = torch.sigmoid(d).sum(dim=-1)
+
+                    val_alignment_score = (
+                        pred_durations.float().std() /
+                        (pred_durations.float().mean() + 1e-6)
+                    ).item()
+
+                    alignment_score_total += val_alignment_score
+
                     mel_len = int(mel_input_length.min().item() / 2 - 1)
                     en = []
                     gt = []
@@ -1115,30 +1182,45 @@ def main(config_path):
                 except Exception as e:
                     logger.exception(e)
                     continue
-
+        
+        if iters_test == 0:
+            logger.warning(
+                f"[Validation] No valid validation batches at epoch {epoch+1}. "
+                "Skipping validation logging."
+            )
+            continue
+            
         print('Epochs:', epoch + 1)
         logger.info('Validation loss: %.3f, Dur loss: %.3f, F0 loss: %.3f' % (loss_test / iters_test, loss_align / iters_test, loss_f / iters_test) + '\n\n\n')
         print('\n\n\n')
         writer.add_scalar('eval/mel_loss', loss_test / iters_test, epoch + 1)
-        writer.add_scalar('eval/dur_loss', loss_test / iters_test, epoch + 1)
+        writer.add_scalar('eval/dur_loss', loss_align / iters_test, epoch + 1)
         writer.add_scalar('eval/F0_loss', loss_f / iters_test, epoch + 1)
 
         # ── W&B validation metrics ────────────────────────────────────────────
         # commit=False — we flush together with the audio table below so all
         # end-of-epoch metrics appear as one atomic step in W&B.
+        
         wandb.log({
+            "eval/epoch": epoch + 1,
             "eval/mel_loss": (loss_test  / iters_test).item(),
             "eval/dur_loss": (loss_align / iters_test).item(),
             "eval/F0_loss":  (loss_f     / iters_test).item(),
-        }, step=iters, commit=False)
+
+            "eval/alignment_score":
+                alignment_score_total / max(iters_test, 1),
+
+        },commit=True)
 
         # ── Per-epoch validation inference + audio saving ─────────────────────
         # Runs full synthesis on the validation set, saves WAV files under
         # Output/Epoch_XXXX/, appends rows to validation_routing.csv, and
         # uploads a small audio table to W&B.
+        infer_mel_loss = float('inf')
+        infer_alignment_score = float('inf')
         if epoch >= infer_start_epoch:
             logger.info("[DEBUG] Validation inference starting...")
-            infer_mel_loss = run_validation_inference(
+            infer_mel_loss, infer_alignment_score = run_validation_inference(
                 epoch=epoch,
                 infer_start_epoch=infer_start_epoch,
                 model=model,
@@ -1152,18 +1234,47 @@ def main(config_path):
                 wandb_run=wandb_run,
                 max_samples_to_log=max_wandb_audio,
             )
-            wandb.log({"eval/infer_mel_loss": infer_mel_loss}, step=iters, commit=False)
-            writer.add_scalar('eval/infer_mel_loss', infer_mel_loss, epoch + 1)
+            wandb.log({
+                "eval/epoch": epoch + 1,
+
+                "eval/infer_mel_loss": infer_mel_loss,
+                "eval/infer_alignment_score": infer_alignment_score,
+            }, commit=True)
+            
+            writer.add_scalar(
+                'eval/infer_alignment_score',
+                infer_alignment_score,
+                epoch + 1
+            )
 
         # Flush all pending end-of-epoch W&B metrics in one call
-        wandb.log({}, step=iters, commit=True)
+        #wandb.log({}, step=iters, commit=True)
         
         if (epoch + 1) % save_freq == 0:
             # Update best loss tracker
-            current_val_loss = loss_test / iters_test
-            is_best = current_val_loss < best_loss
-            if is_best:
-                best_loss = current_val_loss
+        # ==========================================================
+        # Composite checkpoint quality score
+        #
+        # Lower is better
+        #
+        # Prioritizes:
+        # 1. inference mel quality
+        # 2. inference duration/alignment stability
+        # 3. validation alignment consistency
+        # ==========================================================
+            current_score = (
+                infer_mel_loss * 0.60 +
+                infer_alignment_score * 0.30 +
+                (
+                    alignment_score_total / max(iters_test, 1)
+                ) * 0.10
+            )
+
+            is_best = current_score < best_score
+            is_second_best = (
+                current_score < second_best_score and
+                current_score > best_score
+            )
 
             logger.info("[DEBUG] Checkpoint saving starting...")
             print('Saving..')
@@ -1174,34 +1285,75 @@ def main(config_path):
                 'val_loss': loss_test / iters_test,
                 'epoch': epoch,
             }
-
             # Periodic checkpoint — named by epoch number for easy rollback
-            save_path = osp.join(log_dir, 'epoch_2nd_%05d.pth' % epoch)
+            save_path = osp.join(log_dir, 'epoch_%05d.pth' % epoch)
             torch.save(state, save_path)
 
-            #logger.info("[DEBUG] torch.save completed successfully")
 
-            #logger.info(f'[Save] Periodic checkpoint → {save_path}')
-            # 🔴 DEBUG: verify checkpoint was actually written
+            if is_best:
+
+                old_best_score = best_score
+
+                best_score = current_score
+                second_best_score = old_best_score
+
+                previous_best_path = osp.join(log_dir, 'best_model.pth')
+
+                if osp.exists(previous_best_path):
+                    shutil.copy(
+                        previous_best_path,
+                        osp.join(log_dir, 'second_best_model.pth')
+                    )
+
+            if is_second_best:
+                second_best_score = current_score
+
+
+
+
+                #logger.info("[DEBUG] torch.save completed successfully")
+
+                #logger.info(f'[Save] Periodic checkpoint → {save_path}')
+                # 🔴 DEBUG: verify checkpoint was actually written
             if os.path.exists(save_path):
                 logger.info(f"[Save OK] Checkpoint successfully written → {save_path}")
             else:
                 logger.error(f"[Save FAIL] Checkpoint NOT found after saving → {save_path}")
 
-            # Best model — overwrite a single file so you always know which
-            # checkpoint had the lowest validation loss without hunting epoch numbers
+                # Best model — overwrite a single file so you always know which
+                # checkpoint had the lowest validation loss without hunting epoch numbers
+                # ==========================================================
+                # Save BEST model
+                # ==========================================================
             if is_best:
+
                 best_path = osp.join(log_dir, 'best_model.pth')
                 torch.save(state, best_path)
-                # 🔴 DEBUG: verify checkpoint was actually written
-                if os.path.exists(best_path):          # ← FIXED: now correctly checks best_path
-                    logger.info(f"[Save OK] Best model written → {best_path} (val_loss={to_scalar(best_loss):.5f})")
-                else:
-                    logger.error(f"[Save FAIL] Best model NOT found after saving → {best_path}")
-                #logger.info(f'[Save] New best val loss {best_loss:.5f} → {best_path}')
-                # Summary metrics persist across steps in W&B run comparison table
-                wandb.run.summary["best_val_mel_loss"] = to_scalar(best_loss)
-                wandb.run.summary["best_epoch"]        = epoch + 1
+
+                logger.info(
+                    f"[BEST MODEL] "
+                    f"Epoch={epoch+1} "
+                    f"Composite Score={current_score:.5f}"
+                )
+
+                wandb.run.summary["best_score"] = current_score
+                wandb.run.summary["best_epoch"] = epoch + 1
+
+            # ==========================================================
+            # Save SECOND BEST model
+            # ==========================================================
+            if is_second_best:
+
+                second_best_path = osp.join(log_dir, 'second_best_model.pth')
+                torch.save(state, second_best_path)
+
+                logger.info(
+                    f"[SECOND BEST MODEL] "
+                    f"Epoch={epoch+1} "
+                    f"Composite Score={current_score:.5f}"
+                )
+
+                wandb.run.summary["second_best_score"] = second_best_score
 
             # if estimate sigma, save the estimated sigma
             if model_params.diffusion.dist.estimate_sigma_data:
